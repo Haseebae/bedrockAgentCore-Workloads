@@ -1,0 +1,104 @@
+[
+  {
+    "server": "Arxiv",
+    "tool": "download_article",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Arxiv",
+    "tool": "document_retriever",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "find_matching_line_numbers",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "filter_by_level",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "log_summary",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "mean",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "variance",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "standard_deviation",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "median",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "mode",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "count_list_length",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "min_value",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "max_value",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "create_scatter_plot",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "create_histogram",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "create_line_plot",
+    "status": "success",
+    "reason": "Worked successfully"
+  },
+  {
+    "server": "Log",
+    "tool": "create_bar_chart",
+    "status": "success",
+    "reason": "Worked successfully"
+  }
+]

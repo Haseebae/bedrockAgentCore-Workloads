@@ -1,0 +1,6 @@
+bedrock-agentcore
+bedrock-agentcore-starter-toolkit
+boto3>=1.40.0
+langchain
+langgraph
+langchain-openai
