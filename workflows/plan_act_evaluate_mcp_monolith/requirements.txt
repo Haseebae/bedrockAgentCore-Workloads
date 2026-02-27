@@ -6,4 +6,3 @@ langchain
 langgraph
 langchain-openai
 traceloop-sdk
-aws-opentelemetry-distro>=0.10.0

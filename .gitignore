@@ -16,3 +16,6 @@ wheels/
 /fame_reference
 **/logs
 **/*.resolved
+**/fame_reference
+**/.bedrock_agentcore.yaml
+**/.bedrock_agentcore

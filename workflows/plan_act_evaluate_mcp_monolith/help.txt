@@ -1,0 +1,142 @@
+                                         
+ Usage: agentcore configure [OPTIONS]    
+ COMMAND [ARGS]...                       
+                                         
+ Configuration management                
+                                         
+╭─ Options ─────────────────────────────╮
+│ --create  -c                          │
+│ --entry…  -e         TEXT    Entry    │
+│                              point:   │
+│                              file     │
+│                              path     │
+│                              (e.g.,   │
+│                              agent.p… │
+│                              or       │
+│                              directo… │
+│                              path     │
+│                              (auto-d… │
+│                              main.py, │
+│                              agent.p… │
+│                              app.py)  │
+│ --name    -n         TEXT             │
+│ --execu…  -er        TEXT             │
+│ --code-…  -cber      TEXT             │
+│ --ecr     -ecr       TEXT             │
+│ --s3      -s3        TEXT    S3       │
+│                              bucket   │
+│                              for      │
+│                              direct_… │
+│                              deploym… │
+│ --conta…  -ctr       TEXT             │
+│ --requi…  -rf        TEXT    Path to  │
+│                              require… │
+│                              file     │
+│ --disab…  -do                Disable  │
+│                              OpenTel… │
+│ --disab…  -dm                Disable  │
+│                              memory   │
+│ --autho…  -ac        TEXT    OAuth    │
+│                              authori… │
+│                              configu… │
+│                              as JSON  │
+│                              string   │
+│ --reque…  -rha       TEXT    Comma-s… │
+│                              list of  │
+│                              allowed  │
+│                              request  │
+│                              headers  │
+│                              (Author… │
+│                              or       │
+│                              X-Amzn-… │
+│ --vpc                        Enable   │
+│                              VPC      │
+│                              network… │
+│                              mode     │
+│                              (requir… │
+│                              --subne… │
+│                              and      │
+│                              --secur… │
+│ --subne…             TEXT    Comma-s… │
+│                              list of  │
+│                              subnet   │
+│                              IDs      │
+│                              (e.g.,   │
+│                              subnet-… │
+│                              Required │
+│                              with     │
+│                              --vpc.   │
+│ --secur…             TEXT    Comma-s… │
+│                              list of  │
+│                              security │
+│                              group    │
+│                              IDs      │
+│                              (e.g.,   │
+│                              sg-xyz7… │
+│                              Required │
+│                              with     │
+│                              --vpc.   │
+│ --idle-…             INTEGE  Idle     │
+│                      R       runtime  │
+│                      RANGE   session  │
+│                      [60<=x  timeout  │
+│                      <=2880  in       │
+│                      0]      seconds  │
+│                              (60-288… │
+│                              default: │
+│                              900)     │
+│ --max-l…             INTEGE  Maximum  │
+│                      R       instance │
+│                      RANGE   lifetime │
+│                      [60<=x  in       │
+│                      <=2880  seconds  │
+│                      0]      (60-288… │
+│                              default: │
+│                              28800)   │
+│ --verbo…  -v                 Enable   │
+│                              verbose  │
+│                              output   │
+│ --region  -r         TEXT             │
+│ --proto…  -p         TEXT    Server   │
+│                              protocol │
+│                              (HTTP or │
+│                              MCP or   │
+│                              A2A)     │
+│ --non-i…  -ni                Skip     │
+│                              prompts; │
+│                              use      │
+│                              defaults │
+│                              unless   │
+│                              overrid… │
+│ --deplo…  -dt        TEXT    Deploym… │
+│                              type     │
+│                              (contai… │
+│                              or       │
+│                              direct_… │
+│ --runti…  -rt        TEXT    Python   │
+│                              runtime  │
+│                              version  │
+│                              for      │
+│                              direct_… │
+│                              (e.g.,   │
+│                              PYTHON_… │
+│                              PYTHON_… │
+│ --langu…  -lang      TEXT    Project  │
+│                              language │
+│                              (python  │
+│                              or       │
+│                              typescr… │
+│                              Auto-de… │
+│                              if not   │
+│                              specifi… │
+│ --help                       Show     │
+│                              this     │
+│                              message  │
+│                              and      │
+│                              exit.    │
+╰───────────────────────────────────────╯
+╭─ Commands ────────────────────────────╮
+│ list         List configured agents.  │
+│ set-default  Set default agent.       │
+╰───────────────────────────────────────╯
+

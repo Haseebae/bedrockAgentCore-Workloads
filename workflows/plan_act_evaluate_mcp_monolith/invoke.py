@@ -12,7 +12,7 @@ import sys
 
 # ─── Configuration ──────────────────────────────────────────────────────────
 REGION = "ap-south-1"
-RUNTIME_ARN = "arn:aws:bedrock-agentcore:ap-south-1:235319806087:runtime/plan_act_evaluate_monolith-WyMivY7XcU"
+RUNTIME_ARN = "arn:aws:bedrock-agentcore:ap-south-1:235319806087:runtime/reactmcp-tuBkEhG2oo"
 ENDPOINT_NAME = "DEFAULT"
 
 
@@ -26,12 +26,24 @@ def invoke_agent(prompt: str) -> dict:
     print(f"   Endpoint: {ENDPOINT_NAME}")
     print(f"\n📤 Prompt: {prompt}")
 
+    # Generate a dummy traceparent for now just to see it work
+    import uuid
+    trace_id = uuid.uuid4().hex
+    span_id = uuid.uuid4().hex[:16]
+    traceparent = f"00-{trace_id}-{span_id}-01"
+    
+    session_id = str(uuid.uuid4())
+
     response = client.invoke_agent_runtime(
         agentRuntimeArn=RUNTIME_ARN,
         qualifier=ENDPOINT_NAME,
         contentType="application/json",
         accept="application/json",
-        payload=json.dumps({"prompt": prompt}).encode(),
+        runtimeSessionId=session_id,
+        traceId=trace_id,
+        traceParent=traceparent,
+        traceState=f"rojo={span_id}",
+        payload=json.dumps({"prompt": prompt, "session_id": session_id}).encode(),
     )
 
     status = response["statusCode"]

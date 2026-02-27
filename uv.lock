@@ -9,7 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "bedrockac",
-    "custom-mcp",
+    "common",
 ]
 
 [[package]]
@@ -297,7 +297,7 @@ dependencies = [
     { name = "bedrock-agentcore" },
     { name = "bedrock-agentcore-starter-toolkit" },
     { name = "boto3" },
-    { name = "custom-mcp" },
+    { name = "common" },
     { name = "langchain" },
     { name = "langchain-openai" },
     { name = "langgraph" },
@@ -310,7 +310,7 @@ requires-dist = [
     { name = "bedrock-agentcore", specifier = ">=1.3.1" },
     { name = "bedrock-agentcore-starter-toolkit", specifier = ">=0.3.0" },
     { name = "boto3", specifier = ">=1.42.54" },
-    { name = "custom-mcp", editable = "custom_mcp" },
+    { name = "common", editable = "common" },
     { name = "langchain", specifier = ">=1.2.10" },
     { name = "langchain-openai", specifier = ">=1.1.10" },
     { name = "langgraph", specifier = ">=1.0.9" },
@@ -475,15 +475,15 @@ wheels = [
 ]
 
 [[package]]
+name = "common"
+version = "0.1.0"
+source = { editable = "common" }
+
+[[package]]
 name = "cuid"
 version = "0.4"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/55/ca/d323556e2bf9bfb63219fbb849ce61bb830cc42d1b25b91cde3815451b91/cuid-0.4.tar.gz", hash = "sha256:74eaba154916a2240405c3631acee708c263ef8fa05a86820b87d0f59f84e978", size = 4986, upload-time = "2023-03-06T00:41:12.708Z" }
-
-[[package]]
-name = "custom-mcp"
-version = "0.1.0"
-source = { editable = "custom_mcp" }
 
 [[package]]
 name = "deprecated"
