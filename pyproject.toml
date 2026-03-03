@@ -15,6 +15,9 @@ dependencies = [
     "langchain>=1.2.10",
     "langchain-openai>=1.1.10",
     "langgraph>=1.0.9",
+    "langgraph-checkpoint-aws>=1.0.6",
+    "matplotlib>=3.10.8",
+    "pandas>=2.3.3",
     "python-dotenv>=1.2.1",
     "traceloop-sdk>=0.52.5",
 ]

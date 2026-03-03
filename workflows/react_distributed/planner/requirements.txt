@@ -1,0 +1,8 @@
+bedrock-agentcore
+boto3>=1.40.0
+httpx
+langchain
+langgraph
+langchain-openai
+langgraph-checkpoint-aws
+python-dotenv

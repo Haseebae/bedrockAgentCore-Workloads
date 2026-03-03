@@ -1,8 +1,6 @@
 bedrock-agentcore
-bedrock-agentcore-starter-toolkit
 boto3>=1.40.0
-httpx
 langchain
 langgraph
 langchain-openai
-traceloop-sdk
+python-dotenv

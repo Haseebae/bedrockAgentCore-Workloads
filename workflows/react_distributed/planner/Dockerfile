@@ -9,14 +9,14 @@ WORKDIR /app
 COPY common ./common
 
 # Copy requirements
-COPY workflows/plan_act_evaluate_mcp_monolith/requirements.txt .
+COPY workflows/react_distributed/planner/requirements.txt .
 
 # Install dependencies and the custom package using uv
 RUN uv pip install --system --no-cache -r requirements.txt ./common
 
 # Copy agent code
-COPY workflows/plan_act_evaluate_mcp_monolith/app.py .
-COPY workflows/plan_act_evaluate_mcp_monolith/prompts.py .
+COPY workflows/react_distributed/planner/app.py .
+COPY workflows/react_distributed/planner/prompts.py .
 
 EXPOSE 8080
 

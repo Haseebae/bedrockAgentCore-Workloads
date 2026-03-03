@@ -6,16 +6,17 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 # Copy custom package
-COPY custom_mcp ./custom_mcp
+COPY common ./common
 
 # Copy requirements
-COPY workflows/react_agent_mcp/requirements.txt .
+COPY workflows/react_distributed/actor/requirements.txt .
 
 # Install dependencies and the custom package using uv
-RUN uv pip install --system --no-cache -r requirements.txt ./custom_mcp
+RUN uv pip install --system --no-cache -r requirements.txt ./common
 
 # Copy agent code
-COPY workflows/react_agent_mcp/app.py .
+COPY workflows/react_distributed/actor/app.py .
+COPY workflows/react_distributed/actor/prompts.py .
 
 EXPOSE 8080
 

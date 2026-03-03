@@ -4,6 +4,7 @@ import contextvars
 import logging
 import json
 import time
+from datetime import datetime, timezone
 
 
 class SessionMetricsCallback(BaseCallbackHandler):
@@ -12,13 +13,15 @@ class SessionMetricsCallback(BaseCallbackHandler):
         session_id: str, 
         current_node_var: contextvars.ContextVar, 
         metric_logger: logging.Logger,
-        trace_id_var: contextvars.ContextVar = None
+        trace_id_var: contextvars.ContextVar = None,
+        state_id_var: contextvars.ContextVar = None
     ):
         self.session_id = session_id
         self.llm_starts = {}
         self.current_node_var = current_node_var
         self.metric_logger = metric_logger
         self.trace_id_var = trace_id_var
+        self.state_id_var = state_id_var
     
     def on_llm_start(self, serialized, prompts, *, run_id, parent_run_id, **kwargs):
         node_name = self.current_node_var.get()
@@ -118,11 +121,14 @@ class SessionMetricsCallback(BaseCallbackHandler):
                             output_bytes += len(json.dumps(gen.text).encode("utf-8"))
 
         trace_id = self.trace_id_var.get() if self.trace_id_var else "unknown_trace"
+        state_id = self.state_id_var.get() if self.state_id_var else "unknown_state"
 
         self.metric_logger.info(json.dumps({
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
             "event_type": "llm_call",
             "session_id": self.session_id,
             "trace_id": trace_id,
+            "state_id": state_id,
             "run_id": str(run_id),
             "parent_run_id": str(parent_run_id),
             "node_name": node_name,

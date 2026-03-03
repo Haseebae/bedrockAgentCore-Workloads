@@ -1,0 +1,4 @@
+bedrock-agentcore
+boto3>=1.40.0
+langgraph
+python-dotenv

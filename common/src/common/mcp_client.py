@@ -114,9 +114,20 @@ class MCPClient:
     def close(self):
         self.client.close()
 
+    @staticmethod
+    def get_mcp_servers_from_env() -> List[str]:
+        """Utility to get SERVER_A through SERVER_E from environment."""
+        import os
+        servers = []
+        for key in ["SERVER_A", "SERVER_B", "SERVER_C", "SERVER_D", "SERVER_E"]:
+            url = os.environ.get(key) or os.environ.get(key.lower())
+            if url:
+                servers.append(url)
+        return servers
+
 if __name__ == "__main__":
     # Use the known Lambda Function URL from test_connectivity.py
-    url = "https://pozocm7uzpxqw7qotf72bs5sfy0rtlqw.lambda-url.ap-south-1.on.aws/"
+    url = os.environ.get("SERVER_A")
     print(f"Connecting to {url}...")
     client = MCPClient(url)
     
@@ -131,7 +142,7 @@ if __name__ == "__main__":
         
         # Test a single tool call
         tool_name = "download_article"
-        arguments = {"title": "Attention Is All You Need"}
+        arguments = {"title": "Multi-scale competition in the Majorana-Kondo system"}
         
         print(f"\nInvoking '{tool_name}' with {arguments}...")
         result = client.call_tool(tool_name, arguments)
@@ -160,3 +171,4 @@ if __name__ == "__main__":
         print(f"❌ Error: {e}")
     finally:
         client.close()
+

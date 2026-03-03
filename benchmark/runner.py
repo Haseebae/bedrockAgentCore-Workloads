@@ -3,6 +3,7 @@ Workloads Runner for Bedrock AgentCore
 """
 
 import boto3
+from botocore.config import Config
 import json
 import time
 import sys
@@ -14,7 +15,7 @@ import argparse
 
 from arxiv_workloads import get_arxiv_workload
 from log_workloads import get_log_workload
-from logger import parse_local_log_file, query_cloudwatch_structured_logs
+from logger import parse_local_log_file, query_cloudwatch_structured_logs, query_cloudwatch_debug_logs
 
 def _read_response_body(response):
     """Extract plain text from a Bedrock AgentCore response dict."""
@@ -24,7 +25,7 @@ def _read_response_body(response):
     try:
         if hasattr(resp_body, 'read'):
             raw = resp_body.read()
-            return raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+            text_result = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         elif hasattr(resp_body, '__iter__') and not isinstance(resp_body, (str, bytes, dict)):
             parts = []
             for event in resp_body:
@@ -34,19 +35,31 @@ def _read_response_body(response):
                             parts.append(v["bytes"].decode("utf-8", errors="replace"))
                         elif isinstance(v, bytes):
                             parts.append(v.decode("utf-8", errors="replace"))
-            return "".join(parts)
+            text_result = "".join(parts)
         elif isinstance(resp_body, bytes):
-            return resp_body.decode("utf-8", errors="replace")
+            text_result = resp_body.decode("utf-8", errors="replace")
         elif isinstance(resp_body, str):
-            return resp_body
+            text_result = resp_body
         else:
-            return str(resp_body)
+            text_result = str(resp_body)
     except Exception as e:
-        return f"[response read error: {e}]"
+        text_result = f"[response read error: {e}]"
+        
+    eval_data = {}
+    try:
+        parsed = json.loads(text_result)
+        if isinstance(parsed, dict) and "response" in parsed:
+            text_result = parsed.pop("response")
+            eval_data = parsed
+    except Exception:
+        pass
+        
+    return text_result, eval_data
 
 
-def run_single_query(agent_runtime_arn, query, session_id):
-    client = boto3.client('bedrock-agentcore')
+def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, iteration_count=0):
+    config = Config(read_timeout=900)
+    client = boto3.client('bedrock-agentcore', config=config)
     
     start_time = time.time()
     
@@ -67,20 +80,42 @@ def run_single_query(agent_runtime_arn, query, session_id):
             traceState=f"rojo={span_id}",
             payload=json.dumps({
                 "prompt": query,
-                "session_id": session_id
+                "session_id": session_id,
+                "trace_id": trace_id,
+                "iteration_count": iteration_count,
+                # Crucial: Send the flag to the agent so it configures the checkpointer
+                "memory_config": memory_config_flag 
             }).encode()
         )
         print(f"  [DEBUG] Got response, keys: {list(response.keys())}", flush=True)
+        
+        response_text, eval_data = _read_response_body(response)
 
-        response_text = _read_response_body(response)
         elapsed = time.time() - start_time
+        print("---------")
         print(f"Response ({elapsed:.1f}s): {response_text[:500]}..." if len(response_text) > 500 else f"Response ({elapsed:.1f}s): {response_text}", flush=True)
+        print("---------")
         
         return {
             "query": query,
             "session_id": session_id,
             "trace_id": trace_id,
+            "invocation": {
+                "agentRuntimeArn": agent_runtime_arn,
+                "runtimeSessionId": session_id,
+                "traceId": trace_id,
+                "traceParent": traceparent,
+                "traceState": f"rojo={span_id}",
+                "payload": {
+                    "prompt": query,
+                    "session_id": session_id,
+                    "trace_id": trace_id,
+                    "iteration_count": iteration_count,
+                    "memory_config": memory_config_flag
+                }
+            },
             "success": True,
+            "eval_data": eval_data,
             "elapsed_seconds": elapsed,
             "response_text": response_text,
         }
@@ -91,6 +126,20 @@ def run_single_query(agent_runtime_arn, query, session_id):
             "query": query,
             "session_id": session_id,
             "trace_id": trace_id,
+            "invocation": {
+                "agentRuntimeArn": agent_runtime_arn,
+                "runtimeSessionId": session_id,
+                "traceId": trace_id,
+                "traceParent": traceparent,
+                "traceState": f"rojo={span_id}",
+                "payload": {
+                    "prompt": query,
+                    "session_id": session_id,
+                    "trace_id": trace_id,
+                    "iteration_count": iteration_count,
+                    "memory_config": memory_config_flag
+                }
+            },
             "success": False,
             "error": str(e),
             "elapsed_seconds": elapsed
@@ -105,54 +154,77 @@ def start_stress_test(
     workload_type="arxiv", 
     region="ap-south-1", 
     single_query=False, 
-    cw_wait=30):
-    print(f"Starting stress test for {workload_type}...", flush=True)
+    cw_wait=30,
+    app_name="react",
+    memory_config="empty"
+):
+    start_time_stamp = datetime.now()
+    run_date = start_time_stamp.strftime("%Y-%m-%d")
+    run_timestamp = start_time_stamp.strftime("%H-%M-%S")
+    
+    print(f"Starting stress test for {workload_type} with config: {memory_config}...", flush=True)
 
     if workload_type == "arxiv":
         batch_queries = get_arxiv_workload()
     elif workload_type == "log":
         batch_queries = get_log_workload()
 
-    # use only a single batch
-    batch_queries = batch_queries[:1]
+    # batch_queries = batch_queries[:1]
 
     if single_query:
         batch_queries = [[batch_queries[0][0]]]
         print(f"Single query mode enabled, submitting [{batch_queries[0][0]['name']}]...", flush=True)
 
     execution_buffer = []
-    sessions = []
-    for i,batch in enumerate(batch_queries):
+    
+    # Map the runner's memory config to the agent's memory flag
+    # Both "empty" and "naive" tell the agent to act statelessly
+    agent_memory_flag = "empty" if memory_config in ["empty", "naive"] else "full_trace"
+
+    for i, batch in enumerate(batch_queries):
         print(f"Processing batch {i}")
         session_id = str(uuid.uuid4())
-        naive_memory = ""
+        
+        # Used only if memory_config == "naive"
+        naive_memory_string = "" 
+        
         batch_buffer = []
         for i, q in enumerate(batch):
             print(f"Submitting [{q['name']}] with session {session_id}", flush=True)
-            query = naive_memory + q["query"]
-            print(f"  [DEBUG] Query length: {len(query)} chars", flush=True)
-            result = run_single_query(agent_runtime_arn, query, session_id)
-            print(f"  [DEBUG] Result success={result['success']}, elapsed={result['elapsed_seconds']:.1f}s", flush=True)
-            if result["success"]:
-                print("Injecting memory...")
-                naive_memory += query
-                naive_memory += "\n"
-                naive_memory += result["response_text"]
-                naive_memory += "\n"
+            
+            # Construct the query based on the config mode
+            if memory_config == "naive":
+                final_query = naive_memory_string + "New User Query:\n" + q["query"]
             else:
-                # raise #? 
-                print("Failed to get response, skipping memory injection.")
+                final_query = q["query"]
+                
+            print(f"  [DEBUG] Query length: {len(final_query)} chars", flush=True)
+            
+            result = run_single_query(
+                agent_runtime_arn, 
+                final_query, 
+                session_id, 
+                memory_config_flag=agent_memory_flag
+            )
+            result["name"] = q.get("name", "")
+            result["original_query"] = q.get("query", "")
+            print(f"  [DEBUG] Result success={result['success']}, elapsed={result['elapsed_seconds']:.1f}s", flush=True)
+
+            if result["success"] and memory_config == "naive":
+                print("Injecting naive memory for next turn...")
+                naive_memory_string += f"User: {q['query']}\n"
+                naive_memory_string += f"Agent: {result['response_text']}\n\n"
+            else:
+                if not result["success"]:
+                    print("--------")
+                    print(f"Result status: {result['success']}")
+                    print(f"Result error: {result['error']}")
+                    print("--------")
+
             batch_buffer.append(result)
-        sessions.append(session_id)
         execution_buffer.append(batch_buffer)
 
-    success_batches = []
-    for batch in execution_buffer:
-        successes = [r for r in batch if r["success"]]
-        failures = [r for r in batch if not r["success"]]
-        print(f"Total Queries: {len(batch)}, Successes: {len(successes)}, Failures: {len(failures)}")
-        if len(failures) == 0:
-            success_batches.append(successes)
+    success_batches = execution_buffer
         
     print("\n--- Validating Logs ---")
     
@@ -160,19 +232,27 @@ def start_stress_test(
         print(f"Waiting {cw_wait}s for CloudWatch traces to flush...")
         time.sleep(cw_wait)
     
-    for batch in success_batches:
+    for batch_idx, batch in enumerate(success_batches):
+        mem_char = "e"
+        if memory_config == "naive":
+            mem_char = "n"
+        elif memory_config == "full_trace":
+            mem_char = "m"
+        
+        eval_data_map = {}
+        session_id = None
         for session_info in batch:
             session_id = session_info["session_id"]
             trace_id = session_info.get("trace_id", "unknown")
+            eval_data_map[trace_id] = session_info.get("eval_data", {})
             print(f"\nValidating metrics for session: {session_id} (trace: {trace_id})")
         
-
         metrics = None
         for attempt in range(1, 4):
             print(f"Fetching CloudWatch traces (attempt {attempt}/3)...")
             end = datetime.now(timezone.utc)
             start = end - timedelta(hours=1) 
-            metrics = query_cloudwatch_structured_logs(region, start, end, session_id)
+            metrics = query_cloudwatch_structured_logs(region, start, end, session_id, eval_data_map=eval_data_map, app_name=app_name, memory_config=memory_config)
             if metrics:
                 break
             if attempt < 3:
@@ -184,19 +264,62 @@ def start_stress_test(
             print("Validation Failed: No metrics found.")
             continue
             
-        log_dir = Path(f"/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/{workload_type}")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        out_file = log_dir / f"session_{session_id}_trace_{trace_id}.json"
+        # Also fetch the debug events
+        print(f"Fetching CloudWatch debug logs for session {session_id}...")
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=1)
+        debug_events = query_cloudwatch_debug_logs(region, start, end, session_id)
+            
+        # base dir : /Users/haseeb/Code/iisc/bedrockAC/benchmark/logs 
+        # logs > date > timestamp > runs > workload_batchnum_memconfig > artifacts
+        base_log_dir = Path("/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs")
+        folder_name = f"{workload_type}-batch_{batch_idx+1}-memory_{mem_char}"
+        session_dir = base_log_dir / run_date / run_timestamp / "runs" / folder_name
+        session_dir.mkdir(parents=True, exist_ok=True)
         
+        # 1. metrics.json
+        out_file = session_dir / "metrics.json"
         with open(out_file, "w") as f:
             json.dump(metrics, f, indent=2)
             
-        print(f"Saved parsed log to {out_file}")
+        # 2. debug.json
+        debug_file = session_dir / "debug.json"
+        with open(debug_file, "w") as f:
+            if debug_events:
+                json.dump(debug_events, f, indent=2)
+            else:
+                json.dump([], f)
+                
+        # 3. request.json
+        # Reconstruct all the information used in the invocation in JSON format
+        requests_file = session_dir / "request.json"
+        with open(requests_file, "w") as f:
+            valid_requests = []
+            for session_info in batch:
+                invoc = session_info.get("invocation", {})
+                if session_info.get("name"):
+                    invoc["name"] = session_info.get("name")
+                if session_info.get("original_query"):
+                    invoc["original_query"] = session_info.get("original_query")
+                valid_requests.append(invoc)
+            json.dump(valid_requests, f, indent=2)
+                
+        # 4. actor_result.txt
+        # Get the final response from the batch history
+        actor_result_file = session_dir / "actor_result.txt"
+        with open(actor_result_file, "w") as f:
+            if batch:
+                last_result = batch[-1]
+                f.write(last_result.get("response_text", ""))
+            else:
+                f.write("")
+            
+        print(f"Saved artifacts for session {session_id} to {session_dir}")
             
         llm_calls = 0
         mcp_tools = 0
         
-        for iteration in metrics.get("iterations", {}).values():
+        for iteration in metrics.get("traces", {}).values():
             for graph in iteration.get("graphs", []):
                 for node in graph.get("nodes", []):
                     llm_calls += len(node.get("llm", []))
@@ -216,7 +339,9 @@ if __name__ == "__main__":
     parser.add_argument("--workload", type=str, choices=["arxiv", "log"], default="arxiv", help="Workload to run")
     parser.add_argument("--region", type=str, default="ap-south-1", help="Current region to query logs from")
     parser.add_argument("--single-query", action="store_true", help="Run only the first query from the workload for testing")
-    parser.add_argument("--cw-wait", type=int, default=120, help="Seconds to wait for CloudWatch traces to flush before querying (default 60)")
+    parser.add_argument("--cw-wait", type=int, default=150, help="Seconds to wait for CloudWatch traces to flush before querying (default 60)")
+    parser.add_argument("--app-name", type=str, default="react", help="Name of the Bedrock Agent")
+    parser.add_argument("--memory-config", type=str, default="empty", choices=["empty", "naive", "full_trace"], help="Memory configuration for the agent")
     
     args = parser.parse_args()
     
@@ -225,5 +350,7 @@ if __name__ == "__main__":
         args.workload, 
         args.region,
         args.single_query,
-        args.cw_wait
+        args.cw_wait,
+        args.app_name,
+        args.memory_config
     )

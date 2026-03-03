@@ -103,7 +103,8 @@ papers = [
 ]
 
 ARXIV_WORKLOADS = []
-for i in range(0, len(papers) - 2):
+# 3 papers
+for i in [0,1,2]:
     batch = [
     {
         "name": "Query 1: Introduction and Contributions",
@@ -125,21 +126,21 @@ for i in range(0, len(papers) - 2):
             "Now summarize the primary conclusions, implications, and recommended future work for this paper. "
             "Call out any surprising insights separately."
         )
-    },
-    {
-        "name": "Query 4: Contrast Second Paper",
-        "query": (
-            f"Summarize the main ideas of '{papers[i+1]['title']}' and explicitly contrast them with each of the above papers "
-            "across goals, methods, and findings "
-        )
-    },
-    {
-        "name": "Query 5: Limitations of Third Paper",
-        "query": (
-            f"Summarize only the limitations, open questions, or caveats discussed in the paper "
-            f"'{papers[i+2]['title']}'. Provide the answer as a concise bullet list."
-        )
     }
+    # {
+    #     "name": "Query 4: Contrast Second Paper",
+    #     "query": (
+    #         f"Summarize the main ideas of '{papers[i+1]['title']}' and explicitly contrast them with each of the above papers "
+    #         "across goals, methods, and findings "
+    #     )
+    # },
+    # {
+    #     "name": "Query 5: Limitations of Third Paper",
+    #     "query": (
+    #         f"Summarize only the limitations, open questions, or caveats discussed in the paper "
+    #         f"'{papers[i+2]['title']}'. Provide the answer as a concise bullet list."
+    #     )
+    # }
     ]
     ARXIV_WORKLOADS.append(batch)
 
