@@ -305,14 +305,34 @@ def start_stress_test(
             json.dump(valid_requests, f, indent=2)
                 
         # 4. actor_result.txt
-        # Get the final response from the batch history
+        # Get the response from each query in the batch history
         actor_result_file = session_dir / "actor_result.txt"
         with open(actor_result_file, "w") as f:
-            if batch:
-                last_result = batch[-1]
-                f.write(last_result.get("response_text", ""))
-            else:
-                f.write("")
+            for i, session_info in enumerate(batch):
+                q = session_info.get("original_query", session_info.get("query", ""))
+                r = session_info.get("response_text", "")
+                f.write(f"Q{i+1} :\n{q}\n")
+                f.write(f"R{i+1} :\n{r}\n")
+                if i < len(batch) - 1:
+                    f.write("\n")
+                
+        # 5. summary.json
+        summary_file = session_dir / "summary.json"
+        with open(summary_file, "w") as f:
+            summary_results = []
+            for session_info in batch:
+                eval_success = session_info.get("eval_data", {}).get("success", False)
+                # Format response as a list of strings so it's readable in JSON
+                r_text = session_info.get("response_text", "")
+                r_formatted = r_text.split("\n")
+                
+                result_entry = {
+                    "query": session_info.get("original_query", session_info.get("query", "")),
+                    "response": r_formatted,
+                    "eval_success": eval_success
+                }
+                summary_results.append(result_entry)
+            json.dump(summary_results, f, indent=2)
             
         print(f"Saved artifacts for session {session_id} to {session_dir}")
             

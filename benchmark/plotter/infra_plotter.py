@@ -99,10 +99,6 @@ def load_data(files_by_config):
         run_files = files_by_config.get(config, [])
         if not run_files:
             continue
-        
-        print(f"\n{'='*80}")
-        print(f"CONFIG: {config}")
-        print(f"{'='*80}")
             
         raw_data = {q: {'llm': [], 'agent': [], 'mcp': [], 'success': []} for q in QUERIES}
         
@@ -123,22 +119,10 @@ def load_data(files_by_config):
                 llm_mean = np.mean(raw_data[q]['llm'])
                 agent_mean = np.mean(raw_data[q]['agent'])
                 mcp_mean = np.mean(raw_data[q]['mcp'])
-                total_mean = llm_mean + agent_mean + mcp_mean
                 
                 # Determine DNF if ANY of the aggregated runs failed
                 is_success = all(raw_data[q]['success'])
                 dnf = not is_success
-                
-                llm_values_str = [f"{v:.2f}" for v in raw_data[q]['llm']]
-                agent_values_str = [f"{v:.2f}" for v in raw_data[q]['agent']]
-                mcp_values_str = [f"{v:.2f}" for v in raw_data[q]['mcp']]
-                
-                print(f"\n{q}:")
-                print(f"  LLM:    [{', '.join(llm_values_str)}] = {llm_mean:.3f}¢")
-                print(f"  Agent:  [{', '.join(agent_values_str)}] = {agent_mean:.3f}¢")
-                print(f"  MCP:    [{', '.join(mcp_values_str)}] = {mcp_mean:.3f}¢")
-                print(f"  Total:  {total_mean:.3f}¢")
-                print(f"  Status: {'DNF' if dnf else 'Success'}")
                 
                 aggregated[config][q] = {
                     'llm': llm_mean,
@@ -148,8 +132,6 @@ def load_data(files_by_config):
                 }
             else:
                 aggregated[config][q] = {} # Empty dict implies no data
-        
-        print(f"\n{'='*80}")
                 
     return aggregated
 
@@ -160,24 +142,38 @@ def plot_single_paper(paper_name, paper_data, output_path):
     
     bar_width = 0.6
     x_positions = np.arange(len(CONFIG_ORDER))
-    max_y = 2.0 
+    
+    is_log = "log" in paper_name.lower()
+    max_y = 5.0 if is_log else 2.0
+    
+    # --- Value logging ---
+    exceeds_list = []
+    print(f"\n{'='*80}")
+    print(f"INFRA COST PLOTTER - {paper_name}")
+    print(f"{'='*80}")
     
     for i, query in enumerate(QUERIES):
         ax = axes[i]
+        query_num = query.replace('Query', '')
         
         ax.set_ylim(0, max_y)
         ax.set_xlim(-0.5, len(CONFIG_ORDER) - 0.5)
         
         # Adding Grids and Ticks
-        ax.yaxis.set_major_locator(MultipleLocator(0.5))
-        ax.yaxis.set_minor_locator(MultipleLocator(0.1))
+        if is_log:
+            ax.yaxis.set_major_locator(MultipleLocator(1.25))
+            ax.yaxis.set_minor_locator(MultipleLocator(0.25))
+        else:
+            ax.yaxis.set_major_locator(MultipleLocator(0.5))
+            ax.yaxis.set_minor_locator(MultipleLocator(0.1))
         ax.grid(axis='y', which='major', linestyle='-', alpha=0.5, color='gray')
         ax.grid(axis='y', which='minor', linestyle=':', alpha=0.3, color='gray')
         ax.set_axisbelow(True)
         
         # Query Titles - centered over the bar group
         group_center = (x_positions[0] + x_positions[-1]) / 2
-        ax.text(group_center, 1.9, query, ha='center', va='top', fontweight='bold', fontsize=18)
+        query_y = 4.8 if is_log else 1.9
+        ax.text(group_center, query_y, query, ha='center', va='top', fontweight='bold', fontsize=18)
         
         ax.set_xticks(x_positions)
         ax.set_xticklabels(CONFIG_ORDER, fontweight='bold', fontsize=16)
@@ -204,7 +200,15 @@ def plot_single_paper(paper_name, paper_data, output_path):
             llm = query_metrics.get('llm', 0)
             agent = query_metrics.get('agent', 0)
             mcp = query_metrics.get('mcp', 0)
+            total = llm + agent + mcp
             dnf = query_metrics.get('dnf', False)
+            
+            # Log values
+            cost_exceeds = total > max_y
+            flag = "[EXCEEDS] " if cost_exceeds else "          "
+            print(f"{flag}{paper_name}, Query {query_num}, {config} - max: {max_y}¢, value: {total:.4f}¢ (llm: {llm:.4f}, agent: {agent:.4f}, mcp: {mcp:.4f})")
+            if cost_exceeds:
+                exceeds_list.append(f"  {paper_name}, Query {query_num}, {config} - cost: {total:.4f}¢ > {max_y}¢")
             
             # Bottom: LLM
             ax.bar(j, llm, width=bar_width, color=C_LLM, edgecolor='black', linewidth=1)
@@ -251,7 +255,7 @@ def main():
         safe_title = args.paper.replace(' ', '_')
         args.out = str(Path(__file__).parent / "plots" / f"{safe_title}_{args.agent_type}.pdf")
 
-    print(f"Aggregating data and generating cost plots for {args.paper}...")
+
     paper_data = load_data(files_by_config)
     
     plot_single_paper(args.paper, paper_data, args.out)

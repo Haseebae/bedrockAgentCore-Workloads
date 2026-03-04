@@ -4,7 +4,7 @@ import pandas as pd
 from collections import defaultdict
 
 # The base log directories you provided that represent your 3 different runs
-BASE_LOG_DIRS = [
+ARXIV_LOG_DIRS = [
     # arxiv
     # empty
     # DNF S1-B23 
@@ -26,9 +26,31 @@ BASE_LOG_DIRS = [
     # DNF S2-B1 - replaced
     "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/20-31-56",
     "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/20-40-23"
-
-
 ]
+
+LOG_LOG_DIRS = [
+    # arxiv
+    # empty
+    # DNF S1-B23 
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/00-49-36", 
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/00-35-26",
+    # The last run is wrong. evaluator success status was manually updated
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/00-59-27",
+
+    # naive
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/01-33-35",
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/02-47-47",
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/03-15-15",
+
+    # full_trace - all have some difference or the other. 
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/03-41-41",
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/04-10-39",
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/04-34-40"
+]
+
+BASE_LOG_DIRS = ARXIV_LOG_DIRS + LOG_LOG_DIRS
+print(f"Total number of log directories: {len(BASE_LOG_DIRS)} \n from arxiv: {len(ARXIV_LOG_DIRS)} and logs: {len(LOG_LOG_DIRS)}")
+
 
 OUTPUT_DIR = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs"
 
@@ -77,6 +99,7 @@ def extract_metrics_from_data(data, run_path):
                         "run_path": run_path,
                         "query_number": query_number,
                         "node_name": node_name,
+                        "llm_call_count": 1,
                     }
                     for k, v in llm_call.items():
                         # Extract numerical values (skip booleans or strings like timestamp)
@@ -91,6 +114,7 @@ def extract_metrics_from_data(data, run_path):
                         "run_path": run_path,
                         "query_number": query_number,
                         "node_name": node_name,  # For tool execution this is usually just "tools"
+                        "tool_call_count": 1,
                     }
                     metrics = tool_call.get("metrics", {})
                     for k, v in metrics.items():

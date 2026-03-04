@@ -67,20 +67,26 @@ def generate_plots():
         return
 
     timestamp = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
+    plots_dir = f"/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_plots/{timestamp}"
+    all_exceeds = []
+    all_output_lines = []
+    
     for group_key, runs in papers.items():
         # group_key is like arxiv-batch_1
         parts = group_key.split("-batch_")
         batch_num = parts[1] if len(parts) > 1 else "Unknown"
         
-        # Get nice title if it exists, otherwise formulate one
-        if batch_num in PAPER_TITLES:
-            plot_title = PAPER_TITLES[batch_num][0]
-        else:
-            plot_title = f"Research Summary (Batch {batch_num})"
-        
         # We assign an arbitrary agent_type name here, previously it was 'react_monolith'
         # The logs are aggregated and config-based now, so we just use the workload as the type
         agent_type = parts[0]
+        
+        # Get nice title if it exists, otherwise formulate one
+        if agent_type == "log":
+            plot_title = f"Log Analytics (Log File {batch_num})"
+        elif batch_num in PAPER_TITLES:
+            plot_title = PAPER_TITLES[batch_num][0]
+        else:
+            plot_title = f"Research Summary (Batch {batch_num})"
         
         cmd_args = [
             "--paper", plot_title,
@@ -97,15 +103,56 @@ def generate_plots():
 
         for name, script_path, plotter_dir_name in plotters:
             out_filename = f"{plotter_dir_name}-{agent_type}-batch_{batch_num}.pdf"
-            out_path = f"/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_plots/{timestamp}/{out_filename}"
+            out_path = os.path.join(plots_dir, out_filename)
             
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             
             current_cmd_args = cmd_args + ["--out", out_path]
             
             print(f"Running {name} plotter for '{plot_title}' ({agent_type})...")
-            # Run using the python from the venv
-            subprocess.run([VENV_PYTHON, str(script_path)] + current_cmd_args)
+            # Run using the python from the venv, capture output
+            result = subprocess.run(
+                [VENV_PYTHON, str(script_path)] + current_cmd_args,
+                capture_output=True, text=True
+            )
+            
+            # Print and collect output
+            if result.stdout:
+                print(result.stdout, end='')
+                all_output_lines.append(result.stdout)
+                # Collect [EXCEEDS] lines
+                for line in result.stdout.splitlines():
+                    if line.strip().startswith("[EXCEEDS]"):
+                        all_exceeds.append(f"[{name}] {line.strip()}")
+            if result.stderr:
+                print(result.stderr, end='')
+
+    # --- Consolidated Exceeds Summary ---
+    summary_lines = []
+    summary_lines.append(f"\n{'!'*80}")
+    if all_exceeds:
+        summary_lines.append(f"EXCEEDS SUMMARY - {len(all_exceeds)} value(s) exceeded graph scale")
+        summary_lines.append(f"{'!'*80}")
+        for entry in all_exceeds:
+            summary_lines.append(entry)
+    else:
+        summary_lines.append("EXCEEDS SUMMARY - No values exceeded the graph scale")
+        summary_lines.append(f"{'!'*80}")
+    summary_lines.append(f"{'!'*80}")
+    
+    summary_text = "\n".join(summary_lines)
+    print(summary_text)
+    
+    # Save report to the plots directory
+    report_path = os.path.join(plots_dir, "_report.txt")
+    os.makedirs(plots_dir, exist_ok=True)
+    with open(report_path, 'w') as f:
+        f.write("".join(all_output_lines))
+        f.write("\n")
+        f.write(summary_text)
+        f.write("\n")
+    print(f"\nReport saved to: {report_path}")
+
 
 if __name__ == "__main__":
     generate_plots()

@@ -50,7 +50,7 @@ def extract_metrics_from_trace(filepath):
         
         # Storing sums natively instead of raw values, as plot logic averages values
         plan_lat, act_lat, eval_lat = 0, 0, 0
-        mcp_calls = 0 # Cannot accurately get mcp_calls from aggregated
+        mcp_calls = 0 # Now accurately getting mcp_calls from the tools node in aggregated logs
         
         graphs = iter_data.get("graphs", [])
         for node in graphs:
@@ -67,6 +67,7 @@ def extract_metrics_from_trace(filepath):
                 eval_lat += lat
             elif n_name == "tools":
                 act_lat += node.get("tool_execution_time_ms", 0)
+                mcp_calls += node.get("tool_call_count", 0)
 
         results[query_name] = {
             "plan": plan_lat / 1000.0,
@@ -85,11 +86,7 @@ def load_data(files_by_config):
     for config in CONFIG_ORDER:
         run_files = files_by_config.get(config, [])
         if not run_files:
-            continue  
-        
-        print(f"\n{'='*80}")
-        print(f"CONFIG: {config}")
-        print(f"{'='*80}")
+            continue
             
         raw_data = {q: {'plan': [], 'act': [], 'evaluate': [], 'mcp': [], 'success': []} for q in QUERIES}
         
@@ -133,6 +130,12 @@ def plot_single_paper(paper_name, paper_data, base_color, output_path):
     fig, ax = plt.subplots(figsize=(10, 6)) # Narrowed figsize to match target image aspect ratio
     ax2 = ax.twinx() 
     
+    is_log = "log" in paper_name.lower()
+    
+    # --- Scale limits ---
+    MAX_LATENCY = 400
+    MAX_MCP = 15 if is_log else 8
+    
     # --- Refactored Visual Layout Configuration ---
     bar_width = 0.4
     inter_config_spacing = 0.15
@@ -144,9 +147,16 @@ def plot_single_paper(paper_name, paper_data, base_color, output_path):
     
     mcp_x = []
     mcp_y = []
+    exceeds_list = []
+    
+    # --- Value logging ---
+    print(f"\n{'='*80}")
+    print(f"LATENCY PLOTTER - {paper_name}")
+    print(f"{'='*80}")
 
     for q_idx, query in enumerate(QUERIES):
         query_start_x = current_x
+        query_num = query.replace('Query', '')
             
         for config in CONFIG_ORDER:
             query_metrics = paper_data[config].get(query, {})
@@ -163,6 +173,20 @@ def plot_single_paper(paper_name, paper_data, base_color, output_path):
                 p = query_metrics.get('plan', 0)
                 a = query_metrics.get('act', 0)
                 e = query_metrics.get('evaluate', 0)
+                total_lat = p + a + e
+                mcp_val = query_metrics.get('mcp', 0)
+                
+                # Log values
+                lat_exceeds = total_lat > MAX_LATENCY
+                mcp_exceeds = mcp_val > MAX_MCP
+                lat_flag = "[EXCEEDS] " if lat_exceeds else "          "
+                mcp_flag = "[EXCEEDS] " if mcp_exceeds else "          "
+                print(f"{lat_flag}{paper_name}, Query {query_num}, {config} - max: {MAX_LATENCY}s, value: {total_lat:.2f}s (plan: {p:.2f}, act: {a:.2f}, eval: {e:.2f})")
+                print(f"{mcp_flag}{paper_name}, Query {query_num}, {config} - max: {MAX_MCP}, value: {mcp_val:.2f} (mcp_calls)")
+                if lat_exceeds:
+                    exceeds_list.append(f"  {paper_name}, Query {query_num}, {config} - latency: {total_lat:.2f}s > {MAX_LATENCY}s")
+                if mcp_exceeds:
+                    exceeds_list.append(f"  {paper_name}, Query {query_num}, {config} - mcp_calls: {mcp_val:.2f} > {MAX_MCP}")
                 
                 bottom = 0
                 if p > 0:
@@ -181,7 +205,7 @@ def plot_single_paper(paper_name, paper_data, base_color, output_path):
                             ha='center', va='bottom', fontweight='bold', fontsize=12)
 
                 mcp_x.append(x_center)
-                mcp_y.append(query_metrics.get('mcp', 0))
+                mcp_y.append(mcp_val)
             
             # Print DNF if it failed completely without duration data
             elif dnf:
@@ -208,7 +232,7 @@ def plot_single_paper(paper_name, paper_data, base_color, output_path):
     ax.set_xticks(x_positions)
     ax.set_xticklabels(x_labels, fontweight='bold', fontsize=12)
     ax.set_ylabel('Avg. Time (seconds)', fontweight='bold', fontsize=14)
-    ax.set_ylim(0, 400)
+    ax.set_ylim(0, MAX_LATENCY)
     ax.yaxis.set_major_locator(MultipleLocator(100))
     ax.yaxis.set_minor_locator(MultipleLocator(10))
     ax.grid(axis='y', which='major', linestyle='-', alpha=0.6, color='lightgray', linewidth=1.0)
@@ -216,9 +240,13 @@ def plot_single_paper(paper_name, paper_data, base_color, output_path):
     ax.set_axisbelow(True)
 
     ax2.set_ylabel('Avg. MCP Tool Calls', fontweight='bold', fontsize=14)
-    ax2.set_ylim(0, 8)
-    ax2.yaxis.set_major_locator(MultipleLocator(2))
-    ax2.yaxis.set_minor_locator(MultipleLocator(0.5))
+    ax2.set_ylim(0, MAX_MCP)
+    if is_log:
+        ax2.yaxis.set_major_locator(MultipleLocator(5))
+        ax2.yaxis.set_minor_locator(MultipleLocator(1))
+    else:
+        ax2.yaxis.set_major_locator(MultipleLocator(2))
+        ax2.yaxis.set_minor_locator(MultipleLocator(0.5))
     
     legend_elements = [
         Rectangle((0, 0), 1, 1, facecolor=get_agent_color(base_color, 'plan'), edgecolor='black', label='Plan (Light)'),
@@ -260,7 +288,7 @@ def main():
         safe_title = args.paper.replace(' ', '_')
         args.out = str(Path(__file__).parent / "plots" / f"{safe_title}_{args.agent_type}.pdf")
 
-    print(f"Aggregating data and generating plot for {args.paper}...")
+
     paper_data = load_data(files_by_config)
     
     plot_single_paper(args.paper, paper_data, base_color, args.out)
