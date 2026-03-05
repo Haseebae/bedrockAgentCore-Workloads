@@ -36,8 +36,9 @@ _client = None
 def _get_client():
     global _client
     if _client is None:
+        region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "ap-south-1"))
         config = Config(read_timeout=900)
-        _client = boto3.client("bedrock-agentcore", config=config)
+        _client = boto3.client("bedrock-agentcore", region_name=region, config=config)
     return _client
 
 
@@ -93,11 +94,13 @@ def invoke_sub_agent(runtime_arn: str, payload: dict, agent_name: str) -> dict:
 
         metric_logger.info(json.dumps({
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
-            "event_type": "sub_agent_call",
-            "session_id": session_id,
+            "event_type": "debug",
+            "node_name": "orchestrator",
+            "to_agent": agent_name,
             "trace_id": trace_id,
-            "state_id": payload.get("state_id", "unknown"),
-            "agent_name": agent_name,
+            "session_id": session_id,
+            "orchestrator_state_id": payload.get("orchestrator_state_id", "unknown"),
+            "description": "invoked sub-agent",
             "latency_ms": round(latency_ms, 2),
             "status": "success",
             "response_length": len(text),
@@ -109,11 +112,13 @@ def invoke_sub_agent(runtime_arn: str, payload: dict, agent_name: str) -> dict:
         latency_ms = (time.time() - start_time) * 1000
         metric_logger.info(json.dumps({
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
-            "event_type": "sub_agent_call",
-            "session_id": session_id,
+            "event_type": "debug",
+            "node_name": "orchestrator",
+            "to_agent": agent_name,
             "trace_id": trace_id,
-            "state_id": payload.get("state_id", "unknown"),
-            "agent_name": agent_name,
+            "session_id": session_id,
+            "orchestrator_state_id": payload.get("orchestrator_state_id", "unknown"),
+            "description": "failed to invoke sub-agent",
             "latency_ms": round(latency_ms, 2),
             "status": "error",
             "error": str(e),
@@ -129,9 +134,10 @@ class OrchestratorState(TypedDict):
     prompt: str
     session_id: str
     trace_id: str
-    state_id: str
+    orchestrator_state_id: str
     actor_id: str
     memory_config: str
+    thread_id: str             # trace_id for empty/naive, session_id for full_trace
     agent_state: dict          # {"iteration_count": N, "step_count": N}
     plan: Optional[str]
     actor_result: Optional[str]
@@ -156,9 +162,10 @@ def build_orchestrator():
             "prompt": state["prompt"],
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
-            "state_id": state["state_id"],
+            "orchestrator_state_id": state["orchestrator_state_id"],
             "actor_id": state["actor_id"],
             "memory_config": state["memory_config"],
+            "thread_id": state["thread_id"],
             "agent_state": agent_state,
             "feedback": feedback,
             "previous_plan": previous_plan,
@@ -174,7 +181,7 @@ def build_orchestrator():
             "node_name": "invoke_planner",
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
-            "state_id": state["state_id"],
+            "orchestrator_state_id": state["orchestrator_state_id"],
             "agent_state": updated_agent_state,
         }))
 
@@ -188,9 +195,10 @@ def build_orchestrator():
             "prompt": state["prompt"],
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
-            "state_id": state["state_id"],
+            "orchestrator_state_id": state["orchestrator_state_id"],
             "actor_id": state["actor_id"],
             "memory_config": state["memory_config"],
+            "thread_id": state["thread_id"],
             "agent_state": agent_state,
         }
 
@@ -204,7 +212,7 @@ def build_orchestrator():
             "node_name": "invoke_actor",
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
-            "state_id": state["state_id"],
+            "orchestrator_state_id": state["orchestrator_state_id"],
             "agent_state": updated_agent_state,
         }))
 
@@ -219,9 +227,10 @@ def build_orchestrator():
             "execution": state["actor_result"],
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
-            "state_id": state["state_id"],
+            "orchestrator_state_id": state["orchestrator_state_id"],
             "actor_id": state["actor_id"],
             "memory_config": state["memory_config"],
+            "thread_id": state["thread_id"],
             "agent_state": agent_state,
         }
 
@@ -245,7 +254,7 @@ def build_orchestrator():
             "node_name": "invoke_evaluator",
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
-            "state_id": state["state_id"],
+            "orchestrator_state_id": state["orchestrator_state_id"],
             "evaluation": evaluation,
             "agent_state": updated_agent_state,
         }))
@@ -299,12 +308,21 @@ def handle(payload):
     
     state_id = str(uuid.uuid4())
 
+    # Decide thread_id based on memory_config
+    # empty/naive: thread_id = trace_id (query-level isolation)
+    # full_trace: thread_id = session_id (multi-turn memory)
+    if memory_config == "full_trace":
+        thread_id = session_id
+    else:
+        thread_id = trace_id
+
     metric_logger.info(json.dumps({
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
         "event_type": "orchestrator_start",
         "session_id": session_id,
         "trace_id": trace_id,
-        "state_id": state_id,
+        "orchestrator_state_id": state_id,
+        "thread_id": thread_id,
         "memory_config": memory_config,
         "prompt_length": len(prompt),
     }))
@@ -315,9 +333,10 @@ def handle(payload):
         "prompt": prompt,
         "session_id": session_id,
         "trace_id": trace_id,
-        "state_id": state_id,
+        "orchestrator_state_id": state_id,
         "actor_id": actor_id,
         "memory_config": memory_config,
+        "thread_id": thread_id,
         "agent_state": {"iteration_count": iteration_count, "step_count": 0},
         "plan": None,
         "actor_result": None,
@@ -335,7 +354,7 @@ def handle(payload):
         "feedback": evaluation.get("feedback", None),
         "iteration_count": agent_state.get("iteration_count", 1),
         "max_iterations": int(os.environ.get("MAX_RETRIES", "3")),
-        "state_id": state_id,
+        "orchestrator_state_id": state_id,
     }
 
 

@@ -16,6 +16,7 @@ import argparse
 from arxiv_workloads import get_arxiv_workload
 from log_workloads import get_log_workload
 from logger import parse_local_log_file, query_cloudwatch_structured_logs, query_cloudwatch_debug_logs
+from verify_logs import verify_logs
 
 def _read_response_body(response):
     """Extract plain text from a Bedrock AgentCore response dict."""
@@ -269,6 +270,10 @@ def start_stress_test(
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=1)
         debug_events = query_cloudwatch_debug_logs(region, start, end, session_id)
+        
+        # Verify if a client-side retry pattern happened
+        verification_results = verify_logs(debug_events) if debug_events else {"global_metrics": {}, "traces": {}}
+        global_metrics = verification_results.get("global_metrics", {})
             
         # base dir : /Users/haseeb/Code/iisc/bedrockAC/benchmark/logs 
         # logs > date > timestamp > runs > workload_batchnum_memconfig > artifacts
@@ -276,6 +281,12 @@ def start_stress_test(
         folder_name = f"{workload_type}-batch_{batch_idx+1}-memory_{mem_char}"
         session_dir = base_log_dir / run_date / run_timestamp / "runs" / folder_name
         session_dir.mkdir(parents=True, exist_ok=True)
+
+        # 0. flag.txt (Retry pattern verification result)
+        flag_file = session_dir / "flag.txt"
+        with open(flag_file, "w") as f:
+            f.write(f"TRACE_STATE_COUNT_MISMATCH_PASS={global_metrics.get('all_trace_state_count_mismatch_pass', False)}\n")
+            f.write(f"ALL_WORKFLOW_PROPER_PASS={global_metrics.get('all_workflow_proper_pass', False)}\n")
         
         # 1. metrics.json
         out_file = session_dir / "metrics.json"
@@ -326,10 +337,15 @@ def start_stress_test(
                 r_text = session_info.get("response_text", "")
                 r_formatted = r_text.split("\n")
                 
+                query_trace_id = session_info.get("trace_id")
+                trace_metrics = verification_results.get("traces", {}).get(query_trace_id, {})
+                
                 result_entry = {
                     "query": session_info.get("original_query", session_info.get("query", "")),
                     "response": r_formatted,
-                    "eval_success": eval_success
+                    "eval_success": eval_success,
+                    "trace_state_count_mismatch_pass": trace_metrics.get("trace_state_count_mismatch_pass", False),
+                    "workflow_proper_pass": trace_metrics.get("workflow_proper_pass", False)
                 }
                 summary_results.append(result_entry)
             json.dump(summary_results, f, indent=2)

@@ -41,6 +41,7 @@ session_id_var = contextvars.ContextVar("session_id", default="unknown_session")
 current_node_var = contextvars.ContextVar("current_node", default="actor")
 trace_id_var = contextvars.ContextVar("trace_id", default="unknown_trace")
 state_id_var = contextvars.ContextVar("state_id", default="unknown_state")
+local_state_id_var = contextvars.ContextVar("local_state_id", default="unknown_local_state")
 
 # ==================== AGENT STATE & GRAPH ====================
 
@@ -50,7 +51,7 @@ class AgentState(MessagesState):
     step_count: Optional[int]
 
 
-def build_agent(use_checkpointer=True):
+def build_agent():
     server_urls = MCPClient.get_mcp_servers_from_env()
     from common.mcp_tool_factory import mcp_tools_from_multiple_servers
     all_tools = mcp_tools_from_multiple_servers(
@@ -80,7 +81,8 @@ def build_agent(use_checkpointer=True):
             "step_count": step_count,
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
-            "state_id": state_id_var.get(),
+            "orchestrator_state_id": state_id_var.get(),
+            "local_state_id": local_state_id_var.get(),
             "request": system_msg_content,
             "response": str(response.model_dump())[:1000]
         }))
@@ -113,7 +115,8 @@ def build_agent(use_checkpointer=True):
             "step_count": step_count,
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
-            "state_id": state_id_var.get(),
+            "orchestrator_state_id": state_id_var.get(),
+            "local_state_id": local_state_id_var.get(),
             "request": request_str,
             "response": response_str
         }))
@@ -134,33 +137,25 @@ def build_agent(use_checkpointer=True):
     graph.add_conditional_edges("actor", route_actor)
     graph.add_edge("tools", "actor")
 
-    if use_checkpointer:
-        memory_id = os.environ.get("MEMORY_ID")
-        aws_region = os.environ.get("AWS_REGION", "ap-south-1")
+    memory_id = os.environ.get("MEMORY_ID")
+    aws_region = os.environ.get("AWS_REGION", "ap-south-1")
 
-        if not memory_id:
-            raise ValueError("MEMORY_ID environment variable is missing.")
+    if not memory_id:
+        raise ValueError("MEMORY_ID environment variable is missing.")
 
-        checkpointer = AgentCoreMemorySaver(memory_id, region_name=aws_region)
-        return graph.compile(checkpointer=checkpointer)
-
-    return graph.compile()
+    checkpointer = AgentCoreMemorySaver(memory_id, region_name=aws_region)
+    return graph.compile(checkpointer=checkpointer)
 
 
 # ==================== ENTRYPOINT ====================
 
-_agent_with_checkpointer = None
-_agent_without_checkpointer = None
+_agent = None
 
-def _get_agent(use_checkpointer=True):
-    global _agent_with_checkpointer, _agent_without_checkpointer
-    if use_checkpointer:
-        if _agent_with_checkpointer is None:
-            _agent_with_checkpointer = build_agent(use_checkpointer=True)
-        return _agent_with_checkpointer
-    if _agent_without_checkpointer is None:
-        _agent_without_checkpointer = build_agent(use_checkpointer=False)
-    return _agent_without_checkpointer
+def _get_agent():
+    global _agent
+    if _agent is None:
+        _agent = build_agent()
+    return _agent
 
 
 app = BedrockAgentCoreApp()
@@ -169,7 +164,7 @@ app = BedrockAgentCoreApp()
 def handle(payload):
     """
     Payload contract:
-      IN:  {plan, prompt, session_id, trace_id, state_id, actor_id, memory_config,
+      IN:  {plan, prompt, session_id, trace_id, state_id, actor_id, memory_config, thread_id,
             agent_state: {iteration_count, step_count}}
       OUT: {response: <execution_result text>, agent_state: {iteration_count, step_count}}
     """
@@ -177,20 +172,23 @@ def handle(payload):
     prompt = payload.get("prompt", "")
     session_id = payload.get("session_id", "default_session_id")
     trace_id = payload.get("trace_id", uuid.uuid4().hex)
-    state_id = payload.get("state_id", uuid.uuid4().hex)
+    orchestrator_state_id = payload.get("orchestrator_state_id", uuid.uuid4().hex)
+    local_state_id = uuid.uuid4().hex
     actor_id = payload.get("actor_id", "default_actor_id")
     memory_config = payload.get("memory_config", "empty")
+    thread_id = payload.get("thread_id", trace_id)
     agent_state = payload.get("agent_state", {"iteration_count": 0, "step_count": 0})
 
     session_id_var.set(session_id)
     trace_id_var.set(trace_id)
-    state_id_var.set(state_id)
+    state_id_var.set(orchestrator_state_id)
+    local_state_id_var.set(local_state_id)
     current_node_var.set("actor")
 
     if not os.environ.get("OPENAI_API_KEY"):
         return {"error": "OPENAI_API_KEY not set"}
 
-    agent = _get_agent(use_checkpointer=(memory_config == "full_trace"))
+    agent = _get_agent()
 
     config = {
         "callbacks": [SessionMetricsCallback(
@@ -199,22 +197,13 @@ def handle(payload):
             metric_logger=metric_logger,
             trace_id_var=trace_id_var,
             state_id_var=state_id_var,
-        )]
+        )],
+        "configurable": {
+            "session_id": session_id,
+            "thread_id": thread_id,
+            "actor_id": actor_id,
+        }
     }
-
-    # Configure thread_id based on memory mode
-    if memory_config == "full_trace":
-        config["configurable"] = {
-            "session_id": session_id,
-            "thread_id": session_id,
-            "actor_id": actor_id,
-        }
-    elif memory_config == "empty":
-        config["configurable"] = {
-            "session_id": session_id,
-            "thread_id": trace_id,
-            "actor_id": actor_id,
-        }
 
     # Construct actor prompt with plan context
     actor_prompt = f"Execute the following plan to address the user's query.\n\nPlan: {plan}\n\nUser Query: {prompt}"
@@ -241,4 +230,6 @@ def handle(payload):
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv("/Users/haseeb/Code/iisc/bedrockAC/workflows/react_distributed/actor/.env.dev")
+
+    print(os.environ.get("OPENAI_API_KEY"))
     app.run()

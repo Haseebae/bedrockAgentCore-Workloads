@@ -18,6 +18,9 @@ from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END, MessagesState
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
+# ----- IMPORT FOR NATIVE AGENTCORE MEMORY -----
+from langgraph_checkpoint_aws import AgentCoreMemorySaver
+
 from common.logging_callback import SessionMetricsCallback
 
 from prompts import EVALUATOR_PROMPT
@@ -34,6 +37,7 @@ session_id_var = contextvars.ContextVar("session_id", default="unknown_session")
 current_node_var = contextvars.ContextVar("current_node", default="evaluator")
 trace_id_var = contextvars.ContextVar("trace_id", default="unknown_trace")
 state_id_var = contextvars.ContextVar("state_id", default="unknown_state")
+local_state_id_var = contextvars.ContextVar("local_state_id", default="unknown_local_state")
 
 # ==================== STRUCTURED OUTPUT ====================
 
@@ -90,7 +94,8 @@ def build_agent():
             "step_count": step_count,
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
-            "state_id": state_id_var.get(),
+            "orchestrator_state_id": state_id_var.get(),
+            "local_state_id": local_state_id_var.get(),
             "request": system_msg_content,
             "response": str(eval_result.model_dump())[:1000]
         }))
@@ -105,7 +110,14 @@ def build_agent():
     graph.add_edge(START, "evaluator")
     graph.add_edge("evaluator", END)
 
-    return graph.compile()
+    memory_id = os.environ.get("MEMORY_ID")
+    aws_region = os.environ.get("AWS_REGION", "ap-south-1")
+
+    if not memory_id:
+        raise ValueError("MEMORY_ID environment variable is missing.")
+
+    checkpointer = AgentCoreMemorySaver(memory_id, region_name=aws_region)
+    return graph.compile(checkpointer=checkpointer)
 
 
 # ==================== ENTRYPOINT ====================
@@ -135,13 +147,17 @@ def handle(payload):
     execution = payload.get("execution", "")
     session_id = payload.get("session_id", "default_session_id")
     trace_id = payload.get("trace_id", uuid.uuid4().hex)
-    state_id = payload.get("state_id", uuid.uuid4().hex)
+    orchestrator_state_id = payload.get("orchestrator_state_id", uuid.uuid4().hex)
+    local_state_id = uuid.uuid4().hex
     memory_config = payload.get("memory_config", "empty")
+    thread_id = payload.get("thread_id", trace_id)
+    actor_id = payload.get("actor_id", "default_actor_id")
     agent_state = payload.get("agent_state", {"iteration_count": 0, "step_count": 0})
 
     session_id_var.set(session_id)
     trace_id_var.set(trace_id)
-    state_id_var.set(state_id)
+    state_id_var.set(orchestrator_state_id)
+    local_state_id_var.set(local_state_id)
     current_node_var.set("evaluator")
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -157,7 +173,11 @@ def handle(payload):
             trace_id_var=trace_id_var,
             state_id_var=state_id_var,
         )],
-        "configurable": {"session_id": session_id}
+        "configurable": {
+            "session_id": session_id,
+            "thread_id": thread_id,
+            "actor_id": actor_id,
+        }
     }
 
     iteration_count = agent_state.get("iteration_count", 1)

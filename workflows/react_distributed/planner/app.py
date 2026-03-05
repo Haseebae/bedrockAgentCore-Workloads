@@ -40,6 +40,7 @@ session_id_var = contextvars.ContextVar("session_id", default="unknown_session")
 current_node_var = contextvars.ContextVar("current_node", default="planner")
 trace_id_var = contextvars.ContextVar("trace_id", default="unknown_trace")
 state_id_var = contextvars.ContextVar("state_id", default="unknown_state")
+local_state_id_var = contextvars.ContextVar("local_state_id", default="unknown_local_state")
 
 # ==================== TOOL DISCOVERY ====================
 
@@ -75,7 +76,7 @@ class PlannerState(MessagesState):
     step_count: Optional[int]
 
 
-def build_agent(use_checkpointer=True):
+def build_agent():
     model_name = os.environ.get("MODEL_NAME", "openai:gpt-4o-mini")
     model = init_chat_model(model_name)
 
@@ -85,68 +86,74 @@ def build_agent(use_checkpointer=True):
         iteration_count = (state.get("iteration_count") or 0) + 1
         step_count = (state.get("step_count") or 0) + 1
 
-        _, tools_description = _discover_tools()
-        system_msg_content = PLANNER_PROMPT.format(tools_description=tools_description)
+        try:
+            _, tools_description = _discover_tools()
+            system_msg_content = PLANNER_PROMPT.format(tools_description=tools_description)
 
-        # Include feedback from previous failed attempt
-        if state.get("evaluation_feedback"):
-            system_msg_content += f"\n\nPrevious attempt failed. Feedback:\n{state['evaluation_feedback']}"
+            # Include feedback from previous failed attempt
+            if state.get("evaluation_feedback"):
+                system_msg_content += f"\n\nPrevious attempt failed. Feedback:\n{state['evaluation_feedback']}"
 
-        system_msg = SystemMessage(content=system_msg_content)
-        response = model.invoke([system_msg] + messages)
+            system_msg = SystemMessage(content=system_msg_content)
+            response = model.invoke([system_msg] + messages)
 
-        metric_logger.info(json.dumps({
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
-            "event_type": "debug",
-            "node_name": "planner",
-            "iteration_count": iteration_count,
-            "step_count": step_count,
-            "trace_id": trace_id_var.get(),
-            "session_id": session_id_var.get(),
-            "state_id": state_id_var.get(),
-            "request": system_msg_content,
-            "response": str(response.model_dump())[:1000]
-        }))
+            metric_logger.info(json.dumps({
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+                "event_type": "debug",
+                "node_name": "planner",
+                "iteration_count": iteration_count,
+                "step_count": step_count,
+                "trace_id": trace_id_var.get(),
+                "session_id": session_id_var.get(),
+                "orchestrator_state_id": state_id_var.get(),
+                "local_state_id": local_state_id_var.get(),
+                "request": system_msg_content,
+                "response": str(response.model_dump())[:1000]
+            }))
 
-        return {
-            "messages": [response],
-            "plan": response.content,
-            "iteration_count": iteration_count,
-            "step_count": step_count,
-        }
+            return {
+                "messages": [response],
+                "plan": response.content,
+                "iteration_count": iteration_count,
+                "step_count": step_count,
+            }
+        except Exception as e:
+            metric_logger.error(json.dumps({
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+                "event_type": "error",
+                "node_name": "planner",
+                "trace_id": trace_id_var.get(),
+                "session_id": session_id_var.get(),
+                "orchestrator_state_id": state_id_var.get(),
+                "local_state_id": local_state_id_var.get(),
+                "error": str(e)
+            }))
+            raise
 
     graph = StateGraph(PlannerState)
     graph.add_node("planner", planner_node)
     graph.add_edge(START, "planner")
     graph.add_edge("planner", END)
 
-    if use_checkpointer:
-        memory_id = os.environ.get("MEMORY_ID")
-        aws_region = os.environ.get("AWS_REGION", "ap-south-1")
+    memory_id = os.environ.get("MEMORY_ID")
+    aws_region = os.environ.get("AWS_REGION", "ap-south-1")
 
-        if not memory_id:
-            raise ValueError("MEMORY_ID environment variable is missing.")
+    if not memory_id:
+        raise ValueError("MEMORY_ID environment variable is missing.")
 
-        checkpointer = AgentCoreMemorySaver(memory_id, region_name=aws_region)
-        return graph.compile(checkpointer=checkpointer)
-
-    return graph.compile()
+    checkpointer = AgentCoreMemorySaver(memory_id, region_name=aws_region)
+    return graph.compile(checkpointer=checkpointer)
 
 
 # ==================== ENTRYPOINT ====================
 
-_agent_with_checkpointer = None
-_agent_without_checkpointer = None
+_agent = None
 
-def _get_agent(use_checkpointer=True):
-    global _agent_with_checkpointer, _agent_without_checkpointer
-    if use_checkpointer:
-        if _agent_with_checkpointer is None:
-            _agent_with_checkpointer = build_agent(use_checkpointer=True)
-        return _agent_with_checkpointer
-    if _agent_without_checkpointer is None:
-        _agent_without_checkpointer = build_agent(use_checkpointer=False)
-    return _agent_without_checkpointer
+def _get_agent():
+    global _agent
+    if _agent is None:
+        _agent = build_agent()
+    return _agent
 
 
 app = BedrockAgentCoreApp()
@@ -155,29 +162,32 @@ app = BedrockAgentCoreApp()
 def handle(payload):
     """
     Payload contract:
-      IN:  {prompt, session_id, trace_id, state_id, actor_id, memory_config, 
+      IN:  {prompt, session_id, trace_id, state_id, actor_id, memory_config, thread_id,
             agent_state: {iteration_count, step_count}, feedback, previous_plan}
       OUT: {response: <plan text>, agent_state: {iteration_count, step_count}}
     """
     prompt = payload.get("prompt", "Hello!")
     session_id = payload.get("session_id", "default_session_id")
     trace_id = payload.get("trace_id", uuid.uuid4().hex)
-    state_id = payload.get("state_id", uuid.uuid4().hex)
+    orchestrator_state_id = payload.get("orchestrator_state_id", uuid.uuid4().hex)
     actor_id = payload.get("actor_id", "default_actor_id")
     memory_config = payload.get("memory_config", "empty")
+    thread_id = payload.get("thread_id", trace_id)
     agent_state = payload.get("agent_state", {"iteration_count": 0, "step_count": 0})
     feedback = payload.get("feedback")
     previous_plan = payload.get("previous_plan")
+    local_state_id = uuid.uuid4().hex
 
     session_id_var.set(session_id)
     trace_id_var.set(trace_id)
-    state_id_var.set(state_id)
+    state_id_var.set(orchestrator_state_id)
+    local_state_id_var.set(local_state_id)
     current_node_var.set("planner")
 
     if not os.environ.get("OPENAI_API_KEY"):
         return {"error": "OPENAI_API_KEY not set"}
 
-    agent = _get_agent(use_checkpointer=(memory_config == "full_trace"))
+    agent = _get_agent()
 
     config = {
         "callbacks": [SessionMetricsCallback(
@@ -186,22 +196,13 @@ def handle(payload):
             metric_logger=metric_logger,
             trace_id_var=trace_id_var,
             state_id_var=state_id_var,
-        )]
+        )],
+        "configurable": {
+            "session_id": session_id,
+            "thread_id": thread_id,
+            "actor_id": actor_id,
+        }
     }
-
-    # Configure thread_id based on memory mode
-    if memory_config == "full_trace":
-        config["configurable"] = {
-            "session_id": session_id,
-            "thread_id": session_id,
-            "actor_id": actor_id,
-        }
-    elif memory_config == "empty":
-        config["configurable"] = {
-            "session_id": session_id,
-            "thread_id": trace_id,
-            "actor_id": actor_id,
-        }
 
     result = agent.invoke({
         "messages": [HumanMessage(content=prompt)],
