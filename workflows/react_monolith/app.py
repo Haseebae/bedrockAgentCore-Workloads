@@ -37,7 +37,7 @@ state_id_var = contextvars.ContextVar("state_id", default="unknown_state")
 from common.logging_callback import SessionMetricsCallback
 from common.mcp_tool_factory import mcp_tools_from_server
 from common.mcp_client import MCPClient
-from prompts import PLANNER_PROMPT, ACTOR_PROMPT, EVALUATOR_PROMPT
+from prompts import PLANNER_PROMPT, ACTOR_PROMPT
 
 # ==================== AGENT SETUP ====================
 
@@ -122,19 +122,9 @@ def build_agent(use_checkpointer=True):
         current_node_var.set("evaluator")
         messages = state["messages"]
         step_count = state["step_count"] + 1
-        plan_json = state.get("plan", "{}")
         iteration_count = state["iteration_count"]
-        max_iterations = 3
         
-        result_json = messages[-1].content
-        system_msg_content = EVALUATOR_PROMPT.format(
-            plan_json=plan_json,
-            result_json=result_json,
-            iteration_count=iteration_count,
-            max_iterations=max_iterations
-        )
-        system_msg = SystemMessage(content=system_msg_content)
-        eval_result = evaluator_model.invoke([system_msg] + messages)
+        eval_result = evaluator_model.invoke(messages)
         metric_logger.info(json.dumps({
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
             "event_type": "debug",
@@ -144,7 +134,7 @@ def build_agent(use_checkpointer=True):
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
-            "request": system_msg_content,
+            "request": "",
             "response": str(eval_result.model_dump())[:1000]
         }))
         return {"evaluation": eval_result.model_dump(), "step_count": step_count}
