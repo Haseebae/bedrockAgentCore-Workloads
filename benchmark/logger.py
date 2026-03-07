@@ -9,7 +9,7 @@ import argparse
 import time
 from datetime import datetime, timedelta, timezone
 
-def query_cloudwatch_structured_logs(region, start_time, end_time, session_id, eval_data_map=None, app_name=None, memory_config=None):
+def query_cloudwatch_structured_logs(region, start_time, end_time, session_id, eval_data_map=None, app_name=None, memory_config=None, workload_type=None, mcp_cache=None):
     client = boto3.client('logs', region_name=region)
     log_group_prefix = "/aws/bedrock-agentcore/runtimes/"
     
@@ -61,7 +61,7 @@ def query_cloudwatch_structured_logs(region, start_time, end_time, session_id, e
     if not events:
         return None
 
-    metrics = _build_metrics(events, session_id, app_name, memory_config)
+    metrics = _build_metrics(events, session_id, app_name, memory_config, workload_type, mcp_cache)
     metrics = _inject_eval_data(metrics, eval_data_map or {})
     return metrics
 
@@ -90,7 +90,7 @@ def _inject_eval_data(metrics, eval_data_map):
     return metrics
 
 
-def _build_metrics(events, session_id, app_name=None, memory_config=None):
+def _build_metrics(events, session_id, app_name=None, memory_config=None, workload_type=None, mcp_cache=None):
     """Reconstruct the LangGraph topological sequence chronologically."""
     
     # Sort by the explicitly parsed timestamp or fall back to empty string
@@ -124,6 +124,10 @@ def _build_metrics(events, session_id, app_name=None, memory_config=None):
         result["app_name"] = app_name
     if memory_config is not None:
         result["memory_config"] = memory_config
+    if workload_type is not None:
+        result["workload_type"] = workload_type
+    if mcp_cache is not None:
+        result["mcp_cache"] = mcp_cache
     
     result["traces"] = iterations
     return result
@@ -230,7 +234,7 @@ def _build_graphs_for_trace(events):
 
     return graphs
 
-def parse_local_log_file(filepath, session_id, eval_data_map=None, app_name=None, memory_config=None):
+def parse_local_log_file(filepath, session_id, eval_data_map=None, app_name=None, memory_config=None, workload_type=None, mcp_cache=None):
     """Parse a local text file containing structured JSON logs per line."""
     events = []
     try:
@@ -249,7 +253,7 @@ def parse_local_log_file(filepath, session_id, eval_data_map=None, app_name=None
     if not events:
         return None
         
-    metrics = _build_metrics(events, session_id, app_name, memory_config)
+    metrics = _build_metrics(events, session_id, app_name, memory_config, workload_type, mcp_cache)
     metrics = _inject_eval_data(metrics, eval_data_map or {})
     return metrics
 
@@ -311,18 +315,40 @@ if __name__ == "__main__":
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--app-name", type=str)
     parser.add_argument("--memory-config", type=str)
+    parser.add_argument("--workload-type", type=str)
+    parser.add_argument("--mcp-cache", type=str, choices=["true", "false"])
     parser.add_argument("--hours-back", type=int, default=1)
     parser.add_argument("--local-log-file", type=str)
     parser.add_argument("--output-file", type=str)
     
     args = parser.parse_args()
     
+    mcp_cache_bool = None
+    if args.mcp_cache:
+        mcp_cache_bool = args.mcp_cache.lower() == "true"
+        
     if args.local_log_file:
-        metrics = parse_local_log_file(args.local_log_file, args.session_id, app_name=args.app_name, memory_config=args.memory_config)
+        metrics = parse_local_log_file(
+            args.local_log_file, 
+            args.session_id, 
+            app_name=args.app_name, 
+            memory_config=args.memory_config,
+            workload_type=args.workload_type,
+            mcp_cache=mcp_cache_bool
+        )
     else:
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=args.hours_back)
-        metrics = query_cloudwatch_structured_logs(args.region, start, end, args.session_id, app_name=args.app_name, memory_config=args.memory_config)
+        metrics = query_cloudwatch_structured_logs(
+            args.region, 
+            start, 
+            end, 
+            args.session_id, 
+            app_name=args.app_name, 
+            memory_config=args.memory_config,
+            workload_type=args.workload_type,
+            mcp_cache=mcp_cache_bool
+        )
         
     if metrics:
         if args.output_file:

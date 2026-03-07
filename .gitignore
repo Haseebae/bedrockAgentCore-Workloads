@@ -24,3 +24,7 @@ wheels/
 # Shell scripts
 # *.sh
 
+# Config files
+config.yaml
+
+

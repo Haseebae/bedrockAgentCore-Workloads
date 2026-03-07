@@ -83,6 +83,7 @@ def build_agent():
             "session_id": session_id_var.get(),
             "orchestrator_state_id": state_id_var.get(),
             "local_state_id": local_state_id_var.get(),
+            "message_len": len(messages),
             "request": system_msg_content,
             "response": str(response.model_dump())[:1000]
         }))
@@ -117,6 +118,7 @@ def build_agent():
             "session_id": session_id_var.get(),
             "orchestrator_state_id": state_id_var.get(),
             "local_state_id": local_state_id_var.get(),
+            "message_len": len(state["messages"]),
             "request": request_str,
             "response": response_str
         }))

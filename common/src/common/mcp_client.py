@@ -116,11 +116,43 @@ class MCPClient:
 
     @staticmethod
     def get_mcp_servers_from_env() -> List[str]:
-        """Utility to get SERVER_A through SERVER_E from environment."""
+        """Utility to get SERVER_A through SERVER_E from environment (legacy)."""
         import os
         servers = []
         for key in ["SERVER_A", "SERVER_B", "SERVER_C", "SERVER_D", "SERVER_E"]:
             url = os.environ.get(key) or os.environ.get(key.lower())
+            if url:
+                servers.append(url)
+        return servers
+
+    @staticmethod
+    def get_mcp_servers_for_workload(workload_type: str, mcp_cache: bool = False) -> List[str]:
+        """Return server URLs filtered by workload_type ('arxiv' | 'log') and mcp_cache flag.
+
+        Env var naming convention:
+          - ARXIV_SERVER_A, ARXIV_SERVER_B          (uncached arxiv)
+          - ARXIV_CACHED_SERVER_A, ARXIV_CACHED_SERVER_B  (cached arxiv)
+          - LOG_SERVER_C, LOG_SERVER_D, LOG_SERVER_E      (uncached log)
+          - LOG_CACHED_SERVER_C, LOG_CACHED_SERVER_D, LOG_CACHED_SERVER_E  (cached log)
+        """
+        import os
+
+        workload_upper = workload_type.upper()  # ARXIV or LOG
+        suffixes = {
+            "ARXIV": ["A", "B"],
+            "LOG": ["C", "D", "E"],
+        }
+        valid_suffixes = suffixes.get(workload_upper, ["A", "B", "C", "D", "E"])
+
+        if mcp_cache:
+            prefix = f"{workload_upper}_CACHED_SERVER_"
+        else:
+            prefix = f"{workload_upper}_SERVER_"
+
+        servers = []
+        for suffix in valid_suffixes:
+            key = f"{prefix}{suffix}"
+            url = os.environ.get(key)
             if url:
                 servers.append(url)
         return servers

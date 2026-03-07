@@ -2,57 +2,26 @@ import os
 import json
 import pandas as pd
 from collections import defaultdict
+from datetime import datetime
 
 # The base log directories you provided that represent your 3 different runs
 ARXIV_LOG_DIRS = [
-    # arxiv
-    # empty
-    # DNF S1-B23 
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/13-49-02", 
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/14-01-24",
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/14-09-33",
-
-    # naive
-    # COLD START - replaced
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/16-32-23",
-    # DNF S2-B2
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/16-39-37",
-    # DNF S3-B2
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/16-47-43",
-
-    # full_trace
-    # S1-B1 - COLD START - replaced
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/20-25-12",
-    # DNF S2-B1 - replaced
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/20-31-56",
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-03/20-40-23"
+    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-07/17-33-03"
 ]
 
 LOG_LOG_DIRS = [
-    # arxiv
-    # empty
-    # DNF S1-B23 
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/00-49-36", 
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/00-35-26",
-    # The last run is wrong. evaluator success status was manually updated
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/00-59-27",
-
-    # naive
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/01-33-35",
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/02-47-47",
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/03-15-15",
-
-    # full_trace - all have some difference or the other. 
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/03-41-41",
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/04-10-39",
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-04/04-34-40"
 ]
+
+
 
 BASE_LOG_DIRS = ARXIV_LOG_DIRS + LOG_LOG_DIRS
 print(f"Total number of log directories: {len(BASE_LOG_DIRS)} \n from arxiv: {len(ARXIV_LOG_DIRS)} and logs: {len(LOG_LOG_DIRS)}")
 
 
-OUTPUT_DIR = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs"
+current_time = datetime.now()
+date_str = current_time.strftime("%Y-%m-%d")
+time_str = current_time.strftime("%H-%M-%S")
+OUTPUT_DIR = f"/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs/{date_str}/{time_str}"
 
 def manually_create_workloads():
     """

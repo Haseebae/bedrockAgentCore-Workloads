@@ -58,7 +58,7 @@ def _read_response_body(response):
     return text_result, eval_data
 
 
-def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, iteration_count=0):
+def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, workload_type, mcp_cache, iteration_count=0):
     config = Config(read_timeout=900)
     client = boto3.client('bedrock-agentcore', config=config)
     
@@ -85,7 +85,9 @@ def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, i
                 "trace_id": trace_id,
                 "iteration_count": iteration_count,
                 # Crucial: Send the flag to the agent so it configures the checkpointer
-                "memory_config": memory_config_flag 
+                "memory_config": memory_config_flag,
+                "workload_type": workload_type,
+                "mcp_cache": mcp_cache
             }).encode()
         )
         print(f"  [DEBUG] Got response, keys: {list(response.keys())}", flush=True)
@@ -112,7 +114,9 @@ def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, i
                     "session_id": session_id,
                     "trace_id": trace_id,
                     "iteration_count": iteration_count,
-                    "memory_config": memory_config_flag
+                    "memory_config": memory_config_flag,
+                    "workload_type": workload_type,
+                    "mcp_cache": mcp_cache
                 }
             },
             "success": True,
@@ -138,7 +142,9 @@ def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, i
                     "session_id": session_id,
                     "trace_id": trace_id,
                     "iteration_count": iteration_count,
-                    "memory_config": memory_config_flag
+                    "memory_config": memory_config_flag,
+                    "workload_type": workload_type,
+                    "mcp_cache": mcp_cache
                 }
             },
             "success": False,
@@ -157,7 +163,8 @@ def start_stress_test(
     single_query=False, 
     cw_wait=30,
     app_name="react",
-    memory_config="empty"
+    memory_config="empty",
+    mcp_cache=True
 ):
     start_time_stamp = datetime.now()
     run_date = start_time_stamp.strftime("%Y-%m-%d")
@@ -170,7 +177,7 @@ def start_stress_test(
     elif workload_type == "log":
         batch_queries = get_log_workload()
 
-    # batch_queries = batch_queries[:1]
+    batch_queries = batch_queries[:1]
 
     if single_query:
         batch_queries = [[batch_queries[0][0]]]
@@ -205,7 +212,9 @@ def start_stress_test(
                 agent_runtime_arn, 
                 final_query, 
                 session_id, 
-                memory_config_flag=agent_memory_flag
+                memory_config_flag=agent_memory_flag,
+                workload_type=workload_type,
+                mcp_cache=mcp_cache
             )
             result["name"] = q.get("name", "")
             result["original_query"] = q.get("query", "")
@@ -253,7 +262,14 @@ def start_stress_test(
             print(f"Fetching CloudWatch traces (attempt {attempt}/3)...")
             end = datetime.now(timezone.utc)
             start = end - timedelta(hours=1) 
-            metrics = query_cloudwatch_structured_logs(region, start, end, session_id, eval_data_map=eval_data_map, app_name=app_name, memory_config=memory_config)
+            metrics = query_cloudwatch_structured_logs(
+                region, start, end, session_id, 
+                eval_data_map=eval_data_map, 
+                app_name=app_name, 
+                memory_config=memory_config,
+                workload_type=workload_type,
+                mcp_cache=mcp_cache
+            )
             if metrics:
                 break
             if attempt < 3:
@@ -276,9 +292,10 @@ def start_stress_test(
         global_metrics = verification_results.get("global_metrics", {})
             
         # base dir : /Users/haseeb/Code/iisc/bedrockAC/benchmark/logs 
-        # logs > date > timestamp > runs > workload_batchnum_memconfig > artifacts
+        # logs > date > timestamp > runs > workload_batchnum_memconfig-cache_true/false > artifacts
         base_log_dir = Path("/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs")
-        folder_name = f"{workload_type}-batch_{batch_idx+1}-memory_{mem_char}"
+        cache_str = str(mcp_cache).lower()
+        folder_name = f"{workload_type}-batch_{batch_idx+1}-memory_{mem_char}-cache_{cache_str}"
         session_dir = base_log_dir / run_date / run_timestamp / "runs" / folder_name
         session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -378,6 +395,7 @@ if __name__ == "__main__":
     parser.add_argument("--cw-wait", type=int, default=150, help="Seconds to wait for CloudWatch traces to flush before querying (default 60)")
     parser.add_argument("--app-name", type=str, default="react", help="Name of the Bedrock Agent")
     parser.add_argument("--memory-config", type=str, default="empty", choices=["empty", "naive", "full_trace"], help="Memory configuration for the agent")
+    parser.add_argument("--mcp-cache", type=str, default="true", choices=["true", "false"], help="Enable or disable MCP cache")
     
     args = parser.parse_args()
     
@@ -388,5 +406,6 @@ if __name__ == "__main__":
         args.single_query,
         args.cw_wait,
         args.app_name,
-        args.memory_config
+        args.memory_config,
+        args.mcp_cache.lower() == "true"
     )
