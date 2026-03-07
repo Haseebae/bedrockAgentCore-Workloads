@@ -56,8 +56,10 @@ class AgentState(MessagesState):
     iteration_count: Optional[int]
     step_count: Optional[int]
 
-def build_agent(use_checkpointer=True):
-    server_urls = MCPClient.get_mcp_servers_from_env()
+def build_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
+    server_urls = MCPClient.get_mcp_servers_for_workload(workload_type, mcp_cache)
+    if not server_urls:
+        raise ValueError(f"No MCP servers found for workload_type={workload_type}, mcp_cache={mcp_cache}")
     from common.mcp_tool_factory import mcp_tools_from_multiple_servers
     all_tools = mcp_tools_from_multiple_servers(server_urls, session_id_var, metric_logger, trace_id_var, state_id_var)
 
@@ -90,6 +92,7 @@ def build_agent(use_checkpointer=True):
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
+            "message_len": len(messages),
             "request": system_msg_content,
             "response": str(response.model_dump())[:1000]
         }))
@@ -113,6 +116,7 @@ def build_agent(use_checkpointer=True):
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
+            "message_len": len(messages),
             "request": system_msg_content,
             "response": str(response.model_dump())[:1000]
         }))
@@ -134,6 +138,7 @@ def build_agent(use_checkpointer=True):
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
+            "message_len": len(messages),
             "request": "",
             "response": str(eval_result.model_dump())[:1000]
         }))
@@ -166,6 +171,7 @@ def build_agent(use_checkpointer=True):
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
+            "message_len": len(state["messages"]),
             "request": request_str,
             "response": response_str
         }))
@@ -212,18 +218,18 @@ def build_agent(use_checkpointer=True):
 
 # ==================== ENTRYPOINT ====================
 
-_agent_with_checkpointer = None
-_agent_without_checkpointer = None
+_agent_cache = {}
 
-def _get_agent(use_checkpointer=True):
-    global _agent_with_checkpointer, _agent_without_checkpointer
-    if use_checkpointer:
-        if _agent_with_checkpointer is None:
-            _agent_with_checkpointer = build_agent(use_checkpointer=True)
-        return _agent_with_checkpointer
-    if _agent_without_checkpointer is None:
-        _agent_without_checkpointer = build_agent(use_checkpointer=False)
-    return _agent_without_checkpointer
+def _get_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
+    global _agent_cache
+    cache_key = (use_checkpointer, workload_type, mcp_cache)
+    if cache_key not in _agent_cache:
+        _agent_cache[cache_key] = build_agent(
+            use_checkpointer=use_checkpointer,
+            workload_type=workload_type,
+            mcp_cache=mcp_cache
+        )
+    return _agent_cache[cache_key]
 
 
 app = BedrockAgentCoreApp()
@@ -238,6 +244,8 @@ def handle(payload):
     actor_id = payload.get("actor_id", "default_actor_id")
     trace_id = payload.get("trace_id", "default_trace_id")
     memory_config = payload.get("memory_config", "empty")
+    workload_type = payload.get("workload_type", "arxiv")
+    mcp_cache = payload.get("mcp_cache", False)
     
     session_id_var.set(session_id)
     trace_id_var.set(trace_id)
@@ -248,7 +256,11 @@ def handle(payload):
     if not os.environ.get("OPENAI_API_KEY"):
         return {"error": "OPENAI_API_KEY not set"}
 
-    agent = _get_agent(use_checkpointer=(memory_config == "full_trace"))
+    agent = _get_agent(
+        use_checkpointer=(memory_config == "full_trace"),
+        workload_type=workload_type,
+        mcp_cache=mcp_cache
+    )
     
     config = {
         "callbacks": [SessionMetricsCallback(
