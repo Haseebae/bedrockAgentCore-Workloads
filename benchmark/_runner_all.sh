@@ -6,9 +6,17 @@ RUNTIME_ARN="arn:aws:bedrock-agentcore:ap-south-1:235319806087:runtime/reactorch
 # Default number of reruns
 RERUNS=3 #Manually select 3
 
-# Default workloads and memory configs
+# Default workloads
 WORKLOADS_STR="arxiv"
-MEMORY_CONFIGS_STR="empty naive full_trace"
+
+# Default combinations of (memory_config, mcp_cache)
+CONFIGS=(
+    "empty false"
+    "naive false"
+    "full_trace false"
+    "empty true"
+    "full_trace true"
+)
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -25,37 +33,37 @@ while [[ "$#" -gt 0 ]]; do
             WORKLOADS_STR="$2"
             shift 2
             ;;
-        --memory-configs)
-            MEMORY_CONFIGS_STR="$2"
-            shift 2
-            ;;
         *)
             echo "Unknown parameter: $1"
-            echo "Usage: $0 [--reruns <number>] [--runtime-arn <arn>] [--workloads \"<workloads>\"] [--memory-configs \"<configs>\"]"
+            echo "Usage: $0 [--reruns <number>] [--runtime-arn <arn>] [--workloads \"<workloads>\"]"
             exit 1
             ;;
     esac
 done
 
 read -ra WORKLOADS <<< "$WORKLOADS_STR"
-read -ra MEMORY_CONFIGS <<< "$MEMORY_CONFIGS_STR"
 
 echo "Starting benchmark sweeps..."
 echo "Runtime ARN: $RUNTIME_ARN"
 echo "Workloads: ${WORKLOADS[*]}"
-echo "Memory configs: ${MEMORY_CONFIGS[*]}"
+echo "Configurations to run:"
+for C in "${CONFIGS[@]}"; do
+    echo "  - $C"
+done
 echo "Reruns per combination: $RERUNS"
 echo "========================================="
 
 for WORKLOAD in "${WORKLOADS[@]}"; do
-    for MEMORY_CONFIG in "${MEMORY_CONFIGS[@]}"; do
+    for CONFIG_ITEM in "${CONFIGS[@]}"; do
+        read -r MEM_CONFIG CACHE_CONFIG <<< "$CONFIG_ITEM"
         for (( i=1; i<=RERUNS; i++ )); do
             echo ""
-            echo ">>> [Workload: $WORKLOAD | Config: $MEMORY_CONFIG | Run: $i / $RERUNS] <<<"
+            echo ">>> [Workload: $WORKLOAD | Config: $MEM_CONFIG | Cache: $CACHE_CONFIG | Run: $i / $RERUNS] <<<"
             python /Users/haseeb/Code/iisc/bedrockAC/benchmark/runner.py \
                 --runtime-arn "$RUNTIME_ARN" \
                 --workload "$WORKLOAD" \
-                --memory-config "$MEMORY_CONFIG"
+                --memory-config "$MEM_CONFIG" \
+                --mcp-cache "$CACHE_CONFIG"
             
             if [ $? -ne 0 ]; then
                 echo "Warning: runner.py exited with a non-zero status."
