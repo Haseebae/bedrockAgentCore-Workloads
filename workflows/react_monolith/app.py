@@ -8,6 +8,7 @@ import contextvars
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
+import psutil
 
 from pydantic import BaseModel, Field, create_model
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -151,7 +152,7 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
         result = tools_runnable.invoke(state)
         
         iteration_count = state.get("iteration_count")
-        step_count = state.get("step_count")
+        step_count = state.get("step_count", 0) + 1
         
         request_str = ""
         last_message = state["messages"][-1]
@@ -175,6 +176,7 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
             "request": request_str,
             "response": response_str
         }))
+        result["step_count"] = step_count
         return result
 
     def route_actor(state: AgentState):
@@ -238,6 +240,7 @@ app = BedrockAgentCoreApp()
 def handle(payload):
     from dotenv import load_dotenv
     load_dotenv("/Users/haseeb/Code/iisc/bedrockAC/workflows/react_monolith/.env.dev")
+    start_time = time.time()
     prompt = payload.get("prompt", "Hello!")
 
     session_id = payload.get("session_id", "default_session_id")
@@ -279,6 +282,10 @@ def handle(payload):
             "actor_id": actor_id
         }
     
+    # Store initial memory using psutil
+    process = psutil.Process()
+    initial_mem = process.memory_info().rss
+    
     result = agent.invoke({
         "messages": [HumanMessage(content=prompt)], 
         "iteration_count": 0,                       
@@ -287,8 +294,30 @@ def handle(payload):
         "step_count": 0
     }, config=config)
     
+    
     msg = result["messages"][-1]
     eval_dict = result.get("evaluation", {})
+    
+    # Capture peak memory using psutil
+    final_mem = process.memory_info().rss
+    peak_mem = max(initial_mem, final_mem) # Simple approximation, true peak requires a background thread
+    
+    # Convert to GB
+    peak_memory_gb = peak_mem / (1024 * 1024 * 1024)
+
+    end_time = time.time()
+    wall_clock_time = end_time - start_time
+    
+    metric_logger.info(json.dumps({
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+        "event_type": "billing_metrics",
+        "session_id": session_id,
+        "trace_id": trace_id,
+        "state_id": state_id,
+        "peak_memory_gb": round(peak_memory_gb, 4),
+        "step_count": result.get("step_count", 0),
+        "wall_clock_s": round(wall_clock_time, 4)
+    }))
     
     return {
         "response": msg.content,

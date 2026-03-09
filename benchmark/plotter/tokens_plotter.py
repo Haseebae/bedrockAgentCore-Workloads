@@ -8,7 +8,7 @@ from matplotlib.lines import Line2D
 from pathlib import Path
 
 # --- Configuration ---
-CONFIG_ORDER = ['E', 'N', 'M']
+CONFIG_ORDER = ['E', 'N', 'C', 'M', 'MC']
 QUERIES = ['Query1', 'Query2', 'Query3']
 
 # Color mapping matched to the original image's look
@@ -161,9 +161,9 @@ def plot_token_data(paper_name, paper_data, output_path):
         MAX_OUTPUT_TOKENS = 16000
         MAX_COST = 5.00
     else:
-        MAX_INPUT_TOKENS = 80000
-        MAX_OUTPUT_TOKENS = 8000
-        MAX_COST = 2.00
+        MAX_INPUT_TOKENS = 150000
+        MAX_OUTPUT_TOKENS = 16000
+        MAX_COST = 5.00
 
     # --- Refactored Visual Layout Configuration ---
     bar_width = 0.25
@@ -278,13 +278,17 @@ def plot_token_data(paper_name, paper_data, output_path):
         main_ax.yaxis.set_major_locator(MultipleLocator(50000))
         main_ax.yaxis.set_minor_locator(MultipleLocator(10000))
     else:
-        main_ax.yaxis.set_major_locator(MultipleLocator(20000))
-        main_ax.yaxis.set_minor_locator(MultipleLocator(4000))
+        main_ax.yaxis.set_major_locator(MultipleLocator(30000))
+        main_ax.yaxis.set_minor_locator(MultipleLocator(10000))
     main_ax.set_ylabel('Avg. Input Tokens', fontweight='bold', fontsize=16)
 
     ax2.set_ylim(0, MAX_OUTPUT_TOKENS)
-    ax2.yaxis.set_major_locator(MultipleLocator(2000))
-    ax2.yaxis.set_minor_locator(MultipleLocator(400))
+    if is_log:
+        ax2.yaxis.set_major_locator(MultipleLocator(4000))
+        ax2.yaxis.set_minor_locator(MultipleLocator(1000))
+    else:
+        ax2.yaxis.set_major_locator(MultipleLocator(4000))
+        ax2.yaxis.set_minor_locator(MultipleLocator(1000))
     ax2.set_ylabel('Avg. Output Tokens', fontweight='bold', fontsize=16)
 
     ax3.set_ylim(0, MAX_COST)
@@ -349,7 +353,9 @@ def main():
     files_by_config = {
         'E': args.e,
         'N': args.n,
-        'M': args.m
+        'C': args.c,
+        'M': args.m,
+        'MC': args.mc
     }
 
     if not args.out:

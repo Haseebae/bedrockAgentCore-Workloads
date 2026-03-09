@@ -8,7 +8,7 @@ from matplotlib.lines import Line2D
 from pathlib import Path
 
 # --- Configuration ---
-CONFIG_ORDER = ['E', 'N', 'M']
+CONFIG_ORDER = ['E', 'N', 'C', 'M', 'MC']
 QUERIES = ['Query1', 'Query2', 'Query3']
 
 PAPER_COLORS = {
@@ -279,7 +279,9 @@ def main():
     files_by_config = {
         'E': args.e,
         'N': args.n,
-        'M': args.m
+        'C': args.c,
+        'M': args.m,
+        'MC': args.mc
     }
 
     base_color = PAPER_COLORS.get(args.paper.replace(' ', ''), '#4472C4') 

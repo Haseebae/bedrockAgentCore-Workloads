@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define the default runtime ARN here
-RUNTIME_ARN="arn:aws:bedrock-agentcore:ap-south-1:235319806087:runtime/reactorchestrator-A25O0LDLm8"
+RUNTIME_ARN="arn:aws:bedrock-agentcore:ap-south-1:235319806087:runtime/reactmonolith-PyvSfWDbq0"
 
 # Default number of reruns
 RERUNS=3 #Manually select 3
@@ -11,11 +11,11 @@ WORKLOADS_STR="arxiv"
 
 # Default combinations of (memory_config, mcp_cache)
 CONFIGS=(
-    "empty false"
-    "naive false"
-    "full_trace false"
-    "empty true"
-    "full_trace true"
+    "empty false" # E
+    "naive false" # N
+    "naive true" # C
+    "full_trace false" # M
+    "full_trace true" # MC
 )
 
 # Parse arguments

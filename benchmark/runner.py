@@ -177,7 +177,7 @@ def start_stress_test(
     elif workload_type == "log":
         batch_queries = get_log_workload()
 
-    batch_queries = batch_queries[:1]
+    # batch_queries = batch_queries[1:]
 
     if single_query:
         batch_queries = [[batch_queries[0][0]]]
@@ -190,6 +190,9 @@ def start_stress_test(
     agent_memory_flag = "empty" if memory_config in ["empty", "naive"] else "full_trace"
 
     for i, batch in enumerate(batch_queries):
+        if i==0:
+            print("Skipping batch", i+1)
+            continue
         print(f"Processing batch {i}")
         session_id = str(uuid.uuid4())
         

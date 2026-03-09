@@ -7,7 +7,7 @@ from matplotlib.lines import Line2D
 from pathlib import Path
 
 # --- Configuration ---
-CONFIG_ORDER = ['E', 'N', 'M']
+CONFIG_ORDER = ['E', 'N', 'C', 'M', 'MC']
 QUERIES = ['Query1', 'Query2', 'Query3']
 
 # Base colors
@@ -78,7 +78,14 @@ def extract_costs_from_trace(filepath):
         
         # Calculate resulting costs inside the trace iteration
         llm_cost = calculate_llm_cost(in_tok, out_tok, cached_tok)
-        agent_cost = calculate_agent_faas_cost(agent_calls, agent_time_ms / 1000.0)
+        
+        # Use provided pricing details if available, otherwise fallback
+        pricing_details = iter_data.get("pricing_details", {})
+        if pricing_details and "total_cents" in pricing_details:
+            agent_cost = pricing_details["total_cents"]
+        else:
+            agent_cost = calculate_agent_faas_cost(agent_calls, agent_time_ms / 1000.0)
+            
         mcp_cost = calculate_mcp_cost(mcp_calls, mcp_time_ms / 1000.0)
         
         results[query_name] = {
@@ -144,7 +151,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
     x_positions = np.arange(len(CONFIG_ORDER))
     
     is_log = "log" in paper_name.lower()
-    max_y = 5.0 if is_log else 2.0
+    max_y = 5.0
     
     # --- Value logging ---
     exceeds_list = []
@@ -164,15 +171,15 @@ def plot_single_paper(paper_name, paper_data, output_path):
             ax.yaxis.set_major_locator(MultipleLocator(1.25))
             ax.yaxis.set_minor_locator(MultipleLocator(0.25))
         else:
-            ax.yaxis.set_major_locator(MultipleLocator(0.5))
-            ax.yaxis.set_minor_locator(MultipleLocator(0.1))
+            ax.yaxis.set_major_locator(MultipleLocator(1.0))
+            ax.yaxis.set_minor_locator(MultipleLocator(0.25))
         ax.grid(axis='y', which='major', linestyle='-', alpha=0.5, color='gray')
         ax.grid(axis='y', which='minor', linestyle=':', alpha=0.3, color='gray')
         ax.set_axisbelow(True)
         
         # Query Titles - centered over the bar group
         group_center = (x_positions[0] + x_positions[-1]) / 2
-        query_y = 4.8 if is_log else 1.9
+        query_y = 4.8
         ax.text(group_center, query_y, query, ha='center', va='top', fontweight='bold', fontsize=18)
         
         ax.set_xticks(x_positions)
@@ -183,7 +190,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
             ax.set_ylabel('Avg. Cost (cents)', fontweight='bold', fontsize=18)
             legend_elements = [
                 Line2D([0], [0], color=C_LLM, lw=8, label='LLM Cost'),
-                Line2D([0], [0], color=C_AGENT, lw=8, label='Agent FaaS Cost'),
+                Line2D([0], [0], color=C_AGENT, lw=8, label='Bedrock AgentCore Pricing'),
                 Line2D([0], [0], color=C_MCP, lw=8, label='MCP Lambda Cost')
             ]
             ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(0.02, 0.85), 
@@ -248,7 +255,7 @@ def main():
     args = parser.parse_args()
 
     files_by_config = {
-        'E': args.e, 'N': args.n, 'M': args.m
+        'E': args.e, 'N': args.n, 'C': args.c, 'M': args.m, 'MC': args.mc
     }
 
     if not args.out:

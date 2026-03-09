@@ -94,6 +94,9 @@ def _make_tool_func(
             output = "\n".join(output_texts) if output_texts else str(result)
             latency = (time.time() - start_time) * 1000
             
+            # Use execution_time_ms if provided by metrics, otherwise fallback to latency
+            execution_time_ms = metrics.get("execution_time_ms", latency)
+            
             # Emit structured tool metrics
             metric_logger.info(json.dumps({
                 "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
@@ -106,7 +109,8 @@ def _make_tool_func(
                 "latency_ms": round(latency, 2),
                 "mcp_metrics": metrics,
                 "output_bytes": len(output),
-                "status": "success"
+                "status": "success",
+                "wall_clock_s": round(execution_time_ms / 1000, 4)
             }))
             
             return output
@@ -126,7 +130,8 @@ def _make_tool_func(
                 "tool_name": tool_name,
                 "latency_ms": round(latency, 2),
                 "error": str(e),
-                "status": "error"
+                "status": "error",
+                "wall_clock_s": round(latency / 1000, 4)
             }))
 
             return error_msg

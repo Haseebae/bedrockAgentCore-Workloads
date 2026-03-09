@@ -4,7 +4,7 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
-LOGS_DIR = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs"
+LOGS_DIR = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs/2026-03-09/10-18-07"
 VENV_PYTHON = "/Users/haseeb/Code/iisc/bedrockAC/.venv/bin/python"
 
 # Mapping batch numbers to paper titles for backwards compatibility/nice titles
@@ -19,7 +19,7 @@ def discover_papers():
     Scans the LOGS_DIR and groups the JSON logs by workload and batch.
     Returns a structured dictionary similar to the old `papers` list.
     """
-    discovered = defaultdict(lambda: {"empty": "", "naive": "", "m": ""})
+    discovered = defaultdict(lambda: {"empty": "", "naive": "", "c": "", "m": "", "mc": ""})
     
     if not os.path.exists(LOGS_DIR):
         print(f"Directory not found: {LOGS_DIR}")
@@ -43,12 +43,16 @@ def discover_papers():
             
             file_path = os.path.join(LOGS_DIR, file_name)
             
-            if "memory_e" in memory_part:
+            if "memory_e" in memory_part and "cache_false" in name_no_ext:
                 discovered[group_key]["empty"] = file_path
-            elif "memory_n" in memory_part:
+            elif "memory_n" in memory_part and "cache_false" in name_no_ext:
                 discovered[group_key]["naive"] = file_path
-            elif "memory_m" in memory_part:
+            elif "memory_n" in memory_part and "cache_true" in name_no_ext:
+                discovered[group_key]["c"] = file_path
+            elif "memory_m" in memory_part and "cache_false" in name_no_ext:
                 discovered[group_key]["m"] = file_path
+            elif "memory_m" in memory_part and "cache_true" in name_no_ext:
+                discovered[group_key]["mc"] = file_path
 
     return discovered
 
@@ -95,11 +99,15 @@ def generate_plots():
 
         e_log = runs.get("empty")
         n_log = runs.get("naive")
+        c_log = runs.get("c")
         m_log = runs.get("m")
+        mc_log = runs.get("mc")
 
         if e_log: cmd_args.extend(["--e", e_log])
         if n_log: cmd_args.extend(["--n", n_log])
+        if c_log: cmd_args.extend(["--c", c_log])
         if m_log: cmd_args.extend(["--m", m_log])
+        if mc_log: cmd_args.extend(["--mc", mc_log])
 
         for name, script_path, plotter_dir_name in plotters:
             out_filename = f"{plotter_dir_name}-{agent_type}-batch_{batch_num}.pdf"

@@ -136,6 +136,7 @@ class SessionMetricsCallback(BaseCallbackHandler):
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "input_bytes": input_bytes,
-            "output_bytes": output_bytes
+            "output_bytes": output_bytes,
+            "wall_clock_s": round(latency / 1000, 4)
         }))
 

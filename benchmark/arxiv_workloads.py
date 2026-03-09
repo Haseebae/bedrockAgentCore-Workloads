@@ -104,7 +104,7 @@ papers = [
 
 ARXIV_WORKLOADS = []
 # 3 papers
-for i in [0,1,2]:
+for i in [0, 1, 2]:
     batch = [
     {
         "name": "Query 1: Introduction and Contributions",

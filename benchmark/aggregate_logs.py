@@ -5,8 +5,14 @@ from collections import defaultdict
 from datetime import datetime
 
 # The base log directories you provided that represent your 3 different runs
+
+base_dir = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs/2026-03-09/10-31-41"
+dirs = []
+for dir in os.listdir(base_dir):
+    if dir != "_archive":
+        dirs.append(os.path.join(base_dir, dir))
+
 ARXIV_LOG_DIRS = [
-    "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-07/17-33-03"
 ]
 
 LOG_LOG_DIRS = [
@@ -14,7 +20,7 @@ LOG_LOG_DIRS = [
 
 
 
-BASE_LOG_DIRS = ARXIV_LOG_DIRS + LOG_LOG_DIRS
+BASE_LOG_DIRS = dirs+ ARXIV_LOG_DIRS + LOG_LOG_DIRS
 print(f"Total number of log directories: {len(BASE_LOG_DIRS)} \n from arxiv: {len(ARXIV_LOG_DIRS)} and logs: {len(LOG_LOG_DIRS)}")
 
 
@@ -104,6 +110,7 @@ def aggregate_batch(batch_name, run_paths):
     session_ids = []
     trace_ids_by_query = defaultdict(list)
     success_by_query = defaultdict(list)
+    pricing_by_query = defaultdict(list)
     
     for run_path in run_paths:
         metrics_path = os.path.join(run_path, "metrics.json")
@@ -133,6 +140,67 @@ def aggregate_batch(batch_name, run_paths):
                 trace_ids_by_query[query_number].append(trace_id)
                 success_by_query[query_number].append(trace_data.get("success", False))
                 
+            # Compute pricing
+            llm_wall_clocks = {}
+            mcp_wall_clocks = {}
+            for graph in trace_data.get("graphs", []):
+                for node in graph.get("nodes", []):
+                    for llm_call in node.get("llm", []):
+                        latency_s = llm_call.get("network_latency_ms", 0) / 1000.0
+                        state_id = llm_call.get("state_id")
+                        if state_id:
+                            llm_wall_clocks[state_id] = llm_wall_clocks.get(state_id, 0) + latency_s
+                            
+                    mcp_tools = node.get("mcp_tools", {})
+                    for tool_call in mcp_tools.values():
+                        latency_s = tool_call.get("wall_clock_s", 0)
+                        state_id = tool_call.get("state_id")
+                        if state_id:
+                            mcp_wall_clocks[state_id] = mcp_wall_clocks.get(state_id, 0) + latency_s
+                            
+            billing_metrics = trace_data.get("billing_metrics", {})
+            states = billing_metrics.get("states", [])
+            
+            total_vcpu_cents = 0.0
+            total_gb_cents = 0.0
+            total_memory_cents = 0.0
+            
+            for state in states:
+                state_id = state.get("state_id")
+                wall_clock = state.get("wall_clock_s", 0)
+                peak_memory = state.get("peak_memory_gb", 0)
+                step_count = state.get("step_count", 0)
+                
+                sum_llm = llm_wall_clocks.get(state_id, 0)
+                sum_mcp = mcp_wall_clocks.get(state_id, 0)
+                
+                active_processing_time = max(0, wall_clock - (sum_llm + sum_mcp))
+                
+                vcpu_cents = (active_processing_time * 0.0895 / 3600) * 100
+                gb_cents = (wall_clock * peak_memory * 0.00945 / 3600) * 100
+                memory_cents = ((1 + step_count) * 0.25 / 1000) * 100
+                
+                total_vcpu_cents += vcpu_cents
+                total_gb_cents += gb_cents
+                total_memory_cents += memory_cents
+                
+            pricing_record = {
+                "trace_id": trace_id,
+                "runtime_vcpu-hour_cents": total_vcpu_cents,
+                "runtime_gb-hour_cents": total_gb_cents,
+                "memory_events_cents": total_memory_cents,
+                "total_cents": total_vcpu_cents + total_gb_cents + total_memory_cents,
+                "runtime_details": {
+                    "active_processing_time_s": active_processing_time,
+                    "wall_clock_s": wall_clock,
+                    "peak_memory_gb": peak_memory,
+                    "step_count": step_count,
+                    "sum_llm_s": sum_llm,
+                    "sum_mcp_s": sum_mcp,
+                },
+            }
+            pricing_by_query[query_number].append(pricing_record)
+                
         records = extract_metrics_from_data(data, run_path)
         all_records.extend(records)
         
@@ -155,11 +223,20 @@ def aggregate_batch(batch_name, run_paths):
     # Sort for readability: chronologically by turn/query, then alphabetically by node
     final_aggregated = final_aggregated.sort_values(by=["query_number", "node_name"])
     
-    # Parse log_metadata from batch_name (e.g., arxiv-batch_1-memory_e)
+    # Parse log_metadata from batch_name (e.g., arxiv-batch_1-memory_e-cache_false)
     parts = batch_name.split("-")
     workload = parts[0] if len(parts) > 0 else "unknown"
     batch_val = parts[1].replace("batch_", "") if len(parts) > 1 and parts[1].startswith("batch_") else "unknown"
     memory_val = parts[2].replace("memory_", "") if len(parts) > 2 and parts[2].startswith("memory_") else "unknown"
+    cache_val = parts[3].replace("cache_", "") if len(parts) > 3 and parts[3].startswith("cache_") else "unknown"
+    
+    # Map to unique config tracking identifiers based on memory and cache 
+    config_id = "unknown"
+    if memory_val in ["e", "empty"] and cache_val == "false": config_id = "E"
+    elif memory_val in ["n", "naive"] and cache_val == "false": config_id = "N"
+    elif memory_val in ["n", "naive"] and cache_val == "true": config_id = "C"
+    elif memory_val in ["m", "full_trace"] and cache_val == "false": config_id = "M"
+    elif memory_val in ["m", "full_trace", "mc"] and cache_val == "true": config_id = "MC"
     
     # Construct the final nested format
     output_data = {
@@ -170,7 +247,9 @@ def aggregate_batch(batch_name, run_paths):
         "log_metadata": {
             "workload": workload,
             "batch": batch_val,
-            "memory": memory_val
+            "memory": memory_val,
+            "cache": cache_val,
+            "config_id": config_id
         },
         "traces": {}
     }
@@ -184,9 +263,26 @@ def aggregate_batch(batch_name, run_paths):
         if q_str not in output_data["traces"]:
             # Only set success to True if ALL collected success instances for this query are True.
             overall_success = all(success_by_query.get(q_num, [False]))
+            
+            # Average the pricing across the matching run_paths for this query
+            pricing_list = pricing_by_query.get(q_num, [])
+            avg_pricing = {}
+            if pricing_list:
+                for key in ["runtime_vcpu-hour_cents", "runtime_gb-hour_cents", "memory_events_cents", "total_cents"]:
+                    avg_pricing[key] = sum(p.get(key, 0) for p in pricing_list) / len(pricing_list)
+                avg_pricing["all_runs_details"] = pricing_list
+            else:
+                avg_pricing = {
+                    "runtime_vcpu-hour_cents": 0,
+                    "runtime_gb-hour_cents": 0,
+                    "memory_events_cents": 0,
+                    "total_cents": 0
+                }
+                
             output_data["traces"][q_str] = {
                 "trace_ids": trace_ids_by_query.get(q_num, []),
                 "success": overall_success,
+                "pricing_details": avg_pricing,
                 "graphs": []
             }
             

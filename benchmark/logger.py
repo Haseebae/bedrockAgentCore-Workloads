@@ -20,7 +20,7 @@ def query_cloudwatch_structured_logs(region, start_time, end_time, session_id, e
 
     query = f"""
     fields @timestamp, @message
-    | filter event_type in ["llm_call", "mcp_tool_execution"]
+    | filter event_type in ["llm_call", "mcp_tool_execution", "billing_metrics"]
     | filter session_id = "{session_id}"
     | sort @timestamp asc
     """
@@ -85,6 +85,8 @@ def _inject_eval_data(metrics, eval_data_map):
                 
             new_trace_data = {"trace_id": trace_id}
             new_trace_data.update(eval_data)
+            if "billing_metrics" in trace_data:
+                new_trace_data["billing_metrics"] = trace_data["billing_metrics"]
             new_trace_data["graphs"] = trace_data.get("graphs", [])
             metrics["traces"][iter_key] = new_trace_data
     return metrics
@@ -110,9 +112,13 @@ def _build_metrics(events, session_id, app_name=None, memory_config=None, worklo
 
     iterations = {}
     for iter_idx, (trace_id, trace_events) in enumerate(trace_groups.items(), start=1):
-        graphs = _build_graphs_for_trace(trace_events)
+        billing_events = [e for e in trace_events if e.get("event_type") == "billing_metrics"]
+        graph_events = [e for e in trace_events if e.get("event_type") != "billing_metrics"]
+        
+        graphs = _build_graphs_for_trace(graph_events)
         iterations[str(iter_idx)] = {
             "trace_id": trace_id,
+            "billing_metrics": {"states": billing_events},
             "graphs": graphs
         }
 
@@ -178,7 +184,8 @@ def _build_graphs_for_trace(events):
                     "network_latency_ms": ev.get("latency_ms", 0),
                     "input_bytes": ev.get("input_bytes", 0),
                     "output_bytes": ev.get("output_bytes", 0),
-                    "state_id": ev.get("state_id", "unknown_state")
+                    "state_id": ev.get("state_id", "unknown_state"),
+                    "wall_clock_s": ev.get("wall_clock_s", ev.get("wall_clock", 0.0))
                 })
         else:
             for j, ev in enumerate(block["events"]):
@@ -187,7 +194,8 @@ def _build_graphs_for_trace(events):
                     "tool_name": ev.get("tool_name", "unknown"),
                     "timestamp": ev.get("timestamp", ""),
                     "metrics": ev.get("mcp_metrics", {}),
-                    "state_id": ev.get("state_id", "unknown_state")
+                    "state_id": ev.get("state_id", "unknown_state"),
+                    "wall_clock_s": ev.get("wall_clock_s", ev.get("wall_clock", 0.0))
                 }
                 
         formatted_nodes.append({
@@ -242,7 +250,7 @@ def parse_local_log_file(filepath, session_id, eval_data_map=None, app_name=None
             for line in f:
                 try:
                     doc = json.loads(line.strip())
-                    if doc.get("session_id") == session_id and doc.get("event_type") in ["llm_call", "mcp_tool_execution"]:
+                    if doc.get("session_id") == session_id and doc.get("event_type") in ["llm_call", "mcp_tool_execution", "billing_metrics"]:
                         events.append(doc)
                 except json.JSONDecodeError:
                     continue
