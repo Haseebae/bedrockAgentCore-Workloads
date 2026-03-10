@@ -190,7 +190,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
             ax.set_ylabel('Avg. Cost (cents)', fontweight='bold', fontsize=18)
             legend_elements = [
                 Line2D([0], [0], color=C_LLM, lw=8, label='LLM Cost'),
-                Line2D([0], [0], color=C_AGENT, lw=8, label='Bedrock AgentCore Pricing'),
+                Line2D([0], [0], color=C_AGENT, lw=8, label='AgentCore Pricing'),
                 Line2D([0], [0], color=C_MCP, lw=8, label='MCP Lambda Cost')
             ]
             ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(0.02, 0.85), 

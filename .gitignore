@@ -22,7 +22,7 @@ wheels/
 **/.bedrock_agentcore
 
 # Shell scripts
-# *.sh
+*.sh
 
 # Config files
 config.yaml

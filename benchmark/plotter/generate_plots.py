@@ -3,9 +3,19 @@ import subprocess
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
+import json
+from dotenv import load_dotenv
 
-LOGS_DIR = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs/2026-03-10/03-40-20"
-VENV_PYTHON = "/Users/haseeb/Code/iisc/bedrockAC/.venv/bin/python"
+config_path = Path(__file__).parent.parent / "config.env"
+if config_path.exists():
+    load_dotenv(config_path)
+
+BASE_LOG_DIR = os.getenv("BASE_LOG_DIR", "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs")
+VENV_PYTHON = os.getenv("VENV_PATH", "/Users/haseeb/Code/iisc/bedrockAC/.venv/bin/python")
+PLOTTER_LOG_EXT = os.getenv("PLOTTER_LOG_EXT", "_aggregated_logs/2026-03-10/14-44-36")
+PLOTTER_PLOTS_EXT = os.getenv("PLOTTER_PLOTS_EXT", "_plots")
+
+LOGS_DIR = os.path.join(BASE_LOG_DIR, PLOTTER_LOG_EXT)
 
 # Mapping batch numbers to paper titles for backwards compatibility/nice titles
 PAPER_TITLES = {
@@ -38,24 +48,28 @@ def discover_papers():
         if len(parts) >= 3:
             workload = parts[0]
             batch_part = parts[1]
-            memory_part = parts[2]
-            s3_part = parts[3]
-            cache_part = parts[4]
             
             group_key = f"{workload}-{batch_part}"
             
             file_path = os.path.join(LOGS_DIR, file_name)
             
-            if "memory_e" in memory_part and "s3_false" in s3_part and "cache_false" in cache_part:
-                discovered[group_key]["empty"] = file_path
-            elif "memory_n" in memory_part and "s3_false" in s3_part and "cache_false" in cache_part:
-                discovered[group_key]["naive"] = file_path
-            elif "memory_n" in memory_part and "s3_true" in s3_part and "cache_true" in cache_part:
-                discovered[group_key]["c"] = file_path
-            elif "memory_m" in memory_part and "s3_true" in s3_part and "cache_false" in cache_part:
-                discovered[group_key]["m"] = file_path
-            elif "memory_m" in memory_part and "s3_true" in s3_part and "cache_true" in cache_part:
-                discovered[group_key]["mc"] = file_path
+            try:
+                with open(file_path, 'r') as f:
+                    data = json.load(f)
+                    config_id = data.get("log_metadata", {}).get("config_id")
+                    
+                    if config_id == "E":
+                        discovered[group_key]["empty"] = file_path
+                    elif config_id == "N":
+                        discovered[group_key]["naive"] = file_path
+                    elif config_id == "C":
+                        discovered[group_key]["c"] = file_path
+                    elif config_id == "M":
+                        discovered[group_key]["m"] = file_path
+                    elif config_id == "MC":
+                        discovered[group_key]["mc"] = file_path
+            except Exception as e:
+                print(f"Error reading {file_path}: {e}")
 
     return discovered
 
@@ -74,7 +88,7 @@ def generate_plots():
         return
 
     timestamp = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
-    plots_dir = f"/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_plots/{timestamp}"
+    plots_dir = os.path.join(BASE_LOG_DIR, PLOTTER_PLOTS_EXT, timestamp)
     all_exceeds = []
     all_output_lines = []
     

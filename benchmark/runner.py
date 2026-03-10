@@ -12,6 +12,7 @@ from pathlib import Path
 import concurrent.futures
 import uuid
 import argparse
+import os
 
 from arxiv_workloads import get_arxiv_workload
 from log_workloads import get_log_workload
@@ -350,9 +351,8 @@ def start_stress_test(
         verification_results = verify_logs(debug_events) if debug_events else {"global_metrics": {}, "traces": {}}
         global_metrics = verification_results.get("global_metrics", {})
             
-        # base dir : /Users/haseeb/Code/iisc/bedrockAC/benchmark/logs 
-        # logs > date > timestamp > runs > workload_batchnum_memconfig-cache_true/false > artifacts
-        base_log_dir = Path("/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs")
+        # base dir from env or default
+        base_log_dir = Path(os.getenv("BASE_LOG_DIR", "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs"))
         s3_str = str(s3_enabled).lower()
         cache_str = str(cache_enabled).lower()
         folder_name = f"{workload_type}-batch_{batch_idx+1}-memory_{mem_char}-s3_{s3_str}-cache_{cache_str}"

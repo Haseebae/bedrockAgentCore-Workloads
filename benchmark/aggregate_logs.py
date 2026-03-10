@@ -4,16 +4,13 @@ import pandas as pd
 from collections import defaultdict
 from datetime import datetime
 
-base_dir = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-10"
+base_log_dir = os.getenv("BASE_LOG_DIR", "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs")
+log_ext = os.getenv("AGG_LOG_EXT", "2026-03-10")
+base_dir = os.path.join(base_log_dir, log_ext)
 dirs = []
 for dir in os.listdir(base_dir):
     if dir != "_archive":
         dirs.append(os.path.join(base_dir, dir))
-
-# base_dir = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/batch_23_raw_logs"
-# for dir in os.listdir(base_dir):
-#     if dir != "_archive":
-#         dirs.append(os.path.join(base_dir, dir))
 
 ARXIV_LOG_DIRS = [
 ]
@@ -30,7 +27,8 @@ print(f"Total number of log directories: {len(BASE_LOG_DIRS)} \n from arxiv: {le
 current_time = datetime.now()
 date_str = current_time.strftime("%Y-%m-%d")
 time_str = current_time.strftime("%H-%M-%S")
-OUTPUT_DIR = f"/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs/{date_str}/{time_str}"
+out_ext = os.getenv("AGG_OUT_EXT", "_aggregated_logs")
+OUTPUT_DIR = os.path.join(base_log_dir, out_ext, date_str, time_str)
 
 def manually_create_workloads():
     """
