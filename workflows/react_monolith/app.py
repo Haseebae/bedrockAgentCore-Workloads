@@ -57,10 +57,10 @@ class AgentState(MessagesState):
     iteration_count: Optional[int]
     step_count: Optional[int]
 
-def build_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
-    server_urls = MCPClient.get_mcp_servers_for_workload(workload_type, mcp_cache)
+def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
+    server_urls = MCPClient.get_mcp_servers_for_workload(workload_type, s3_enabled)
     if not server_urls:
-        raise ValueError(f"No MCP servers found for workload_type={workload_type}, mcp_cache={mcp_cache}")
+        raise ValueError(f"No MCP servers found for workload_type={workload_type}, s3_enabled={s3_enabled}")
     from common.mcp_tool_factory import mcp_tools_from_multiple_servers
     all_tools = mcp_tools_from_multiple_servers(server_urls, session_id_var, metric_logger, trace_id_var, state_id_var)
 
@@ -152,7 +152,7 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
         result = tools_runnable.invoke(state)
         
         iteration_count = state.get("iteration_count")
-        step_count = state.get("step_count", 0) + 1
+        step_count = state.get("step_count")
         
         request_str = ""
         last_message = state["messages"][-1]
@@ -176,7 +176,6 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
             "request": request_str,
             "response": response_str
         }))
-        result["step_count"] = step_count
         return result
 
     def route_actor(state: AgentState):
@@ -222,14 +221,14 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
 
 _agent_cache = {}
 
-def _get_agent(use_checkpointer=True, workload_type="arxiv", mcp_cache=False):
+def _get_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
     global _agent_cache
-    cache_key = (use_checkpointer, workload_type, mcp_cache)
+    cache_key = (use_checkpointer, workload_type, s3_enabled)
     if cache_key not in _agent_cache:
         _agent_cache[cache_key] = build_agent(
             use_checkpointer=use_checkpointer,
             workload_type=workload_type,
-            mcp_cache=mcp_cache
+            s3_enabled=s3_enabled
         )
     return _agent_cache[cache_key]
 
@@ -248,7 +247,7 @@ def handle(payload):
     trace_id = payload.get("trace_id", "default_trace_id")
     memory_config = payload.get("memory_config", "empty")
     workload_type = payload.get("workload_type", "arxiv")
-    mcp_cache = payload.get("mcp_cache", False)
+    s3_enabled = payload.get("s3_enabled", False)
     
     session_id_var.set(session_id)
     trace_id_var.set(trace_id)
@@ -262,7 +261,7 @@ def handle(payload):
     agent = _get_agent(
         use_checkpointer=(memory_config == "full_trace"),
         workload_type=workload_type,
-        mcp_cache=mcp_cache
+        s3_enabled=s3_enabled
     )
     
     config = {

@@ -126,8 +126,8 @@ class MCPClient:
         return servers
 
     @staticmethod
-    def get_mcp_servers_for_workload(workload_type: str, mcp_cache: bool = False) -> List[str]:
-        """Return server URLs filtered by workload_type ('arxiv' | 'log') and mcp_cache flag.
+    def get_mcp_servers_for_workload(workload_type: str, s3_enabled: bool = False) -> List[str]:
+        """Return server URLs filtered by workload_type ('arxiv' | 'log') and s3_enabled flag.
 
         Env var naming convention:
           - ARXIV_SERVER_A, ARXIV_SERVER_B          (uncached arxiv)
@@ -144,7 +144,7 @@ class MCPClient:
         }
         valid_suffixes = suffixes.get(workload_upper, ["A", "B", "C", "D", "E"])
 
-        if mcp_cache:
+        if s3_enabled:
             prefix = f"{workload_upper}_CACHED_SERVER_"
         else:
             prefix = f"{workload_upper}_SERVER_"

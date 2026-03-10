@@ -161,7 +161,7 @@ def plot_token_data(paper_name, paper_data, output_path):
         MAX_OUTPUT_TOKENS = 16000
         MAX_COST = 5.00
     else:
-        MAX_INPUT_TOKENS = 150000
+        MAX_INPUT_TOKENS = 175000
         MAX_OUTPUT_TOKENS = 16000
         MAX_COST = 5.00
 
@@ -261,7 +261,7 @@ def plot_token_data(paper_name, paper_data, output_path):
         group_center_x = (query_start_x + query_end_x) / 2
         
         # Place Query label correctly centered
-        query_y = 205000 if is_log else 75000
+        query_y = 205000 if is_log else 165000
         main_ax.text(group_center_x, query_y, query, ha='center', va='center', fontweight='bold', fontsize=18)
         
         # Add vertical divider midway through the inter_query_spacing
@@ -278,8 +278,8 @@ def plot_token_data(paper_name, paper_data, output_path):
         main_ax.yaxis.set_major_locator(MultipleLocator(50000))
         main_ax.yaxis.set_minor_locator(MultipleLocator(10000))
     else:
-        main_ax.yaxis.set_major_locator(MultipleLocator(30000))
-        main_ax.yaxis.set_minor_locator(MultipleLocator(10000))
+        main_ax.yaxis.set_major_locator(MultipleLocator(25000))
+        main_ax.yaxis.set_minor_locator(MultipleLocator(5000))
     main_ax.set_ylabel('Avg. Input Tokens', fontweight='bold', fontsize=16)
 
     ax2.set_ylim(0, MAX_OUTPUT_TOKENS)

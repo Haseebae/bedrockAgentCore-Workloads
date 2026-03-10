@@ -58,7 +58,7 @@ def _read_response_body(response):
     return text_result, eval_data
 
 
-def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, workload_type, mcp_cache, iteration_count=0):
+def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, workload_type, s3_enabled, iteration_count=0):
     config = Config(read_timeout=900)
     client = boto3.client('bedrock-agentcore', config=config)
     
@@ -87,7 +87,7 @@ def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, w
                 # Crucial: Send the flag to the agent so it configures the checkpointer
                 "memory_config": memory_config_flag,
                 "workload_type": workload_type,
-                "mcp_cache": mcp_cache
+                "s3_enabled": s3_enabled
             }).encode()
         )
         print(f"  [DEBUG] Got response, keys: {list(response.keys())}", flush=True)
@@ -116,7 +116,7 @@ def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, w
                     "iteration_count": iteration_count,
                     "memory_config": memory_config_flag,
                     "workload_type": workload_type,
-                    "mcp_cache": mcp_cache
+                    "s3_enabled": s3_enabled
                 }
             },
             "success": True,
@@ -144,13 +144,63 @@ def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, w
                     "iteration_count": iteration_count,
                     "memory_config": memory_config_flag,
                     "workload_type": workload_type,
-                    "mcp_cache": mcp_cache
+                    "s3_enabled": s3_enabled
                 }
             },
             "success": False,
             "error": str(e),
             "elapsed_seconds": elapsed
         }
+
+# CACHE LOGIC
+
+REGION = "ap-south-1" 
+MCP_LAMBDA_NAMES = ["arxiv-mcp", "rag-mcp"]
+
+def get_lambda_env_variable(lambda_name, env_var_name):
+    """Get an environment variable value from a Lambda function."""
+    lambda_client = boto3.client('lambda', region_name=REGION)
+    try:
+        response = lambda_client.get_function_configuration(FunctionName=lambda_name)
+        env_vars = response.get('Environment', {}).get('Variables', {})
+        return env_vars.get(env_var_name)
+    except Exception as e:
+        print(f"⚠️  Error getting env var {env_var_name} from {lambda_name}: {e}")
+        return None
+
+def set_lambda_env_variable(lambda_name, env_var_name, env_var_value):
+    """Set an environment variable in a Lambda function."""
+    lambda_client = boto3.client('lambda', region_name=REGION)
+    try:
+        # Get current configuration
+        response = lambda_client.get_function_configuration(FunctionName=lambda_name)
+        current_env = response.get('Environment', {}).get('Variables', {})
+        
+        # Update the environment variable
+        current_env[env_var_name] = str(env_var_value)
+        
+        # Update the function configuration
+        lambda_client.update_function_configuration(
+            FunctionName=lambda_name,
+            Environment={'Variables': current_env}
+        )
+        print(f"✅ Set {env_var_name}={env_var_value} for {lambda_name}")
+        return True
+    except Exception as e:
+        print(f"❌ Error setting env var {env_var_name} for {lambda_name}: {e}")
+        return False
+
+def disable_mcp_cache():
+    """Disable MCP cache by setting CACHE_ENABLED=False for all MCP Lambda functions."""
+    print(f"\n🔧 Disabling MCP cache (setting CACHE_ENABLED=False)...")
+    for lambda_name in MCP_LAMBDA_NAMES:
+        set_lambda_env_variable(lambda_name, 'CACHE_ENABLED', 'False')
+
+def enable_mcp_cache():
+    """Restore MCP cache to original values."""
+    print(f"\nEnabling MCP cache (setting CACHE_ENABLED=True)...")
+    for lambda_name in MCP_LAMBDA_NAMES:
+        set_lambda_env_variable(lambda_name, 'CACHE_ENABLED', "True")
 
 # ---------------------------------------------------------------------------
 # Stress-test orchestrator
@@ -164,8 +214,14 @@ def start_stress_test(
     cw_wait=30,
     app_name="react",
     memory_config="empty",
-    mcp_cache=True
+    cache_enabled=False,
+    s3_enabled=False
 ):
+    if cache_enabled:
+        enable_mcp_cache()
+    else:
+        disable_mcp_cache()
+
     start_time_stamp = datetime.now()
     run_date = start_time_stamp.strftime("%Y-%m-%d")
     run_timestamp = start_time_stamp.strftime("%H-%M-%S")
@@ -177,7 +233,7 @@ def start_stress_test(
     elif workload_type == "log":
         batch_queries = get_log_workload()
 
-    # batch_queries = batch_queries[1:]
+    # batch_queries = batch_queries[:1]
 
     if single_query:
         batch_queries = [[batch_queries[0][0]]]
@@ -190,9 +246,9 @@ def start_stress_test(
     agent_memory_flag = "empty" if memory_config in ["empty", "naive"] else "full_trace"
 
     for i, batch in enumerate(batch_queries):
-        if i==0:
-            print("Skipping batch", i+1)
-            continue
+        # if i in [0, 1]:
+        #     print("Skipping batch", i+1)
+        #     continue
         print(f"Processing batch {i}")
         session_id = str(uuid.uuid4())
         
@@ -217,7 +273,7 @@ def start_stress_test(
                 session_id, 
                 memory_config_flag=agent_memory_flag,
                 workload_type=workload_type,
-                mcp_cache=mcp_cache
+                s3_enabled=s3_enabled
             )
             result["name"] = q.get("name", "")
             result["original_query"] = q.get("query", "")
@@ -271,7 +327,7 @@ def start_stress_test(
                 app_name=app_name, 
                 memory_config=memory_config,
                 workload_type=workload_type,
-                mcp_cache=mcp_cache
+                s3_enabled=s3_enabled
             )
             if metrics:
                 break
@@ -297,8 +353,9 @@ def start_stress_test(
         # base dir : /Users/haseeb/Code/iisc/bedrockAC/benchmark/logs 
         # logs > date > timestamp > runs > workload_batchnum_memconfig-cache_true/false > artifacts
         base_log_dir = Path("/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs")
-        cache_str = str(mcp_cache).lower()
-        folder_name = f"{workload_type}-batch_{batch_idx+1}-memory_{mem_char}-cache_{cache_str}"
+        s3_str = str(s3_enabled).lower()
+        cache_str = str(cache_enabled).lower()
+        folder_name = f"{workload_type}-batch_{batch_idx+1}-memory_{mem_char}-s3_{s3_str}-cache_{cache_str}"
         session_dir = base_log_dir / run_date / run_timestamp / "runs" / folder_name
         session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -398,7 +455,8 @@ if __name__ == "__main__":
     parser.add_argument("--cw-wait", type=int, default=150, help="Seconds to wait for CloudWatch traces to flush before querying (default 60)")
     parser.add_argument("--app-name", type=str, default="react", help="Name of the Bedrock Agent")
     parser.add_argument("--memory-config", type=str, default="empty", choices=["empty", "naive", "full_trace"], help="Memory configuration for the agent")
-    parser.add_argument("--mcp-cache", type=str, default="true", choices=["true", "false"], help="Enable or disable MCP cache")
+    parser.add_argument("--cache-enabled", type=str, default="true", choices=["true", "false"], help="Enable or disable MCP cache")
+    parser.add_argument("--s3-enabled", type=str, default="false", choices=["true", "false"], help="Enable or disable S3 for MCP")
     
     args = parser.parse_args()
     
@@ -410,5 +468,6 @@ if __name__ == "__main__":
         args.cw_wait,
         args.app_name,
         args.memory_config,
-        args.mcp_cache.lower() == "true"
+        args.cache_enabled.lower() == "true",
+        args.s3_enabled.lower() == "true"
     )

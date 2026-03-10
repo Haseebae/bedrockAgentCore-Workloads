@@ -4,7 +4,7 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
-LOGS_DIR = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs/2026-03-09/10-18-07"
+LOGS_DIR = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs/2026-03-10/03-40-20"
 VENV_PYTHON = "/Users/haseeb/Code/iisc/bedrockAC/.venv/bin/python"
 
 # Mapping batch numbers to paper titles for backwards compatibility/nice titles
@@ -32,26 +32,29 @@ def discover_papers():
         # Example format: arxiv-batch_1-memory_e.json
         name_no_ext = file_name[:-5]
         parts = name_no_ext.split("-")
+        print(parts)
         
         # We expect at least workload-batch_X-memory_Y
         if len(parts) >= 3:
             workload = parts[0]
             batch_part = parts[1]
             memory_part = parts[2]
+            s3_part = parts[3]
+            cache_part = parts[4]
             
             group_key = f"{workload}-{batch_part}"
             
             file_path = os.path.join(LOGS_DIR, file_name)
             
-            if "memory_e" in memory_part and "cache_false" in name_no_ext:
+            if "memory_e" in memory_part and "s3_false" in s3_part and "cache_false" in cache_part:
                 discovered[group_key]["empty"] = file_path
-            elif "memory_n" in memory_part and "cache_false" in name_no_ext:
+            elif "memory_n" in memory_part and "s3_false" in s3_part and "cache_false" in cache_part:
                 discovered[group_key]["naive"] = file_path
-            elif "memory_n" in memory_part and "cache_true" in name_no_ext:
+            elif "memory_n" in memory_part and "s3_true" in s3_part and "cache_true" in cache_part:
                 discovered[group_key]["c"] = file_path
-            elif "memory_m" in memory_part and "cache_false" in name_no_ext:
+            elif "memory_m" in memory_part and "s3_true" in s3_part and "cache_false" in cache_part:
                 discovered[group_key]["m"] = file_path
-            elif "memory_m" in memory_part and "cache_true" in name_no_ext:
+            elif "memory_m" in memory_part and "s3_true" in s3_part and "cache_true" in cache_part:
                 discovered[group_key]["mc"] = file_path
 
     return discovered

@@ -4,13 +4,16 @@ import pandas as pd
 from collections import defaultdict
 from datetime import datetime
 
-# The base log directories you provided that represent your 3 different runs
-
-base_dir = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/_aggregated_logs/2026-03-09/10-31-41"
+base_dir = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/2026-03-10"
 dirs = []
 for dir in os.listdir(base_dir):
     if dir != "_archive":
         dirs.append(os.path.join(base_dir, dir))
+
+# base_dir = "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs/batch_23_raw_logs"
+# for dir in os.listdir(base_dir):
+#     if dir != "_archive":
+#         dirs.append(os.path.join(base_dir, dir))
 
 ARXIV_LOG_DIRS = [
 ]
@@ -228,15 +231,16 @@ def aggregate_batch(batch_name, run_paths):
     workload = parts[0] if len(parts) > 0 else "unknown"
     batch_val = parts[1].replace("batch_", "") if len(parts) > 1 and parts[1].startswith("batch_") else "unknown"
     memory_val = parts[2].replace("memory_", "") if len(parts) > 2 and parts[2].startswith("memory_") else "unknown"
-    cache_val = parts[3].replace("cache_", "") if len(parts) > 3 and parts[3].startswith("cache_") else "unknown"
+    s3_val = parts[3].replace("s3_", "") if len(parts) > 3 and parts[3].startswith("s3_") else "unknown"
+    cache_val = parts[4].replace("cache_", "") if len(parts) > 4 and parts[4].startswith("cache_") else "unknown"
     
     # Map to unique config tracking identifiers based on memory and cache 
     config_id = "unknown"
-    if memory_val in ["e", "empty"] and cache_val == "false": config_id = "E"
-    elif memory_val in ["n", "naive"] and cache_val == "false": config_id = "N"
-    elif memory_val in ["n", "naive"] and cache_val == "true": config_id = "C"
-    elif memory_val in ["m", "full_trace"] and cache_val == "false": config_id = "M"
-    elif memory_val in ["m", "full_trace", "mc"] and cache_val == "true": config_id = "MC"
+    if memory_val in ["e", "empty"] and cache_val == "false" and s3_val == "false": config_id = "E"
+    elif memory_val in ["n", "naive"] and cache_val == "false" and s3_val == "false": config_id = "N"
+    elif memory_val in ["n", "naive"] and cache_val == "true" and s3_val == "true": config_id = "C"
+    elif memory_val in ["m", "full_trace"] and cache_val == "false" and s3_val == "true": config_id = "M"
+    elif memory_val in ["m", "full_trace", "mc"] and cache_val == "true" and s3_val == "true": config_id = "MC"
     
     # Construct the final nested format
     output_data = {

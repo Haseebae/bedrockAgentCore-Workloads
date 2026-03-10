@@ -11,11 +11,11 @@ WORKLOADS_STR="arxiv"
 
 # Default combinations of (memory_config, mcp_cache)
 CONFIGS=(
-    "empty false" # E
-    "naive false" # N
-    "naive true" # C
-    "full_trace false" # M
-    "full_trace true" # MC
+    "empty false false" # E
+    "naive false false" # N
+    "naive true true" # C
+    "full_trace true false" # M
+    "full_trace true true" # MC
 )
 
 # Parse arguments
@@ -55,7 +55,7 @@ echo "========================================="
 
 for WORKLOAD in "${WORKLOADS[@]}"; do
     for CONFIG_ITEM in "${CONFIGS[@]}"; do
-        read -r MEM_CONFIG CACHE_CONFIG <<< "$CONFIG_ITEM"
+        read -r MEM_CONFIG S3_ENABLED CACHE_CONFIG <<< "$CONFIG_ITEM"
         for (( i=1; i<=RERUNS; i++ )); do
             echo ""
             echo ">>> [Workload: $WORKLOAD | Config: $MEM_CONFIG | Cache: $CACHE_CONFIG | Run: $i / $RERUNS] <<<"
@@ -63,7 +63,8 @@ for WORKLOAD in "${WORKLOADS[@]}"; do
                 --runtime-arn "$RUNTIME_ARN" \
                 --workload "$WORKLOAD" \
                 --memory-config "$MEM_CONFIG" \
-                --mcp-cache "$CACHE_CONFIG"
+                --s3-enabled "$S3_ENABLED" \
+                --cache-enabled "$CACHE_CONFIG"
             
             if [ $? -ne 0 ]; then
                 echo "Warning: runner.py exited with a non-zero status."
