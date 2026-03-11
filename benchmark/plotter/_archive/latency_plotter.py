@@ -11,24 +11,26 @@ from pathlib import Path
 CONFIG_ORDER = ['E', 'N', 'C', 'M', 'MC']
 QUERIES = ['Query1', 'Query2', 'Query3']
 
-QUERY_COLORS = {
-    'Query1': {
-        'plan': '#8DA0CB',      # Light blue
-        'act': '#2F5597',       # Dark blue
-        'evaluate': '#151515'   # Dark navy/black
-    },
-    'Query2': {
-        'plan': '#F4B183',      # Light peach/orange
-        'act': '#833C0C',       # Darker brown
-        'evaluate': '#582C09'   # Dark brown/black
-    },
-    'Query3': {
-        'plan': '#A9D18E',      # Light green
-        'act': '#375623',       # Darker olive green
-        'evaluate': '#2B4219'   # Dark green/black
-    }
+PAPER_COLORS = {
+    'Paper1': '#4472C4',  
+    'Paper2': '#8B4513',  
+    'Paper3': '#385723',  
 }
 
+def get_agent_color(base_hex, agent_name):
+    """Generates light, medium, and dark shades of the base color for the stack."""
+    base_color = base_hex.lstrip('#')
+    rgb = tuple(int(base_color[i:i+2], 16) for i in (0, 2, 4))
+    
+    if agent_name == "plan":
+        new_rgb = tuple(int(c * 0.4 + 255 * 0.6) for c in rgb)
+    elif agent_name == "act":
+        new_rgb = tuple(int(c * 0.8) for c in rgb)
+    else:  # evaluate
+        new_rgb = tuple(int(c * 0.4) for c in rgb)
+        
+    new_rgb = tuple(min(255, max(0, int(c))) for c in new_rgb)
+    return '#%02x%02x%02x' % new_rgb
 
 def extract_metrics_from_trace(filepath):
     """Extracts and sums LLM and MCP latencies from the specific trace JSON format."""
@@ -123,7 +125,7 @@ def load_data(files_by_config):
                 
     return aggregated
 
-def plot_single_paper(paper_name, paper_data, output_path):
+def plot_single_paper(paper_name, paper_data, base_color, output_path):
     """Generates the plot."""
     fig, ax = plt.subplots(figsize=(10, 6)) # Narrowed figsize to match target image aspect ratio
     ax2 = ax.twinx() 
@@ -131,7 +133,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
     is_log = "log" in paper_name.lower()
     
     # --- Scale limits ---
-    MAX_LATENCY = 300
+    MAX_LATENCY = 400
     MAX_MCP = 15 if is_log else 8
     
     # --- Refactored Visual Layout Configuration ---
@@ -188,19 +190,19 @@ def plot_single_paper(paper_name, paper_data, output_path):
                 
                 bottom = 0
                 if p > 0:
-                    ax.bar(x_center, p, width=bar_width, bottom=bottom, color=QUERY_COLORS[query]['plan'], edgecolor='black')
+                    ax.bar(x_center, p, width=bar_width, bottom=bottom, color=get_agent_color(base_color, 'plan'), edgecolor='black')
                     bottom += p
                 if a > 0:
-                    ax.bar(x_center, a, width=bar_width, bottom=bottom, color=QUERY_COLORS[query]['act'], edgecolor='black')
+                    ax.bar(x_center, a, width=bar_width, bottom=bottom, color=get_agent_color(base_color, 'act'), edgecolor='black')
                     bottom += a
                 if e > 0:
-                    ax.bar(x_center, e, width=bar_width, bottom=bottom, color=QUERY_COLORS[query]['evaluate'], edgecolor='black')
+                    ax.bar(x_center, e, width=bar_width, bottom=bottom, color=get_agent_color(base_color, 'evaluate'), edgecolor='black')
                     bottom += e
                 
                 if dnf:
                     y_pos = bottom + 5 if bottom > 0 else 10
                     ax.text(x_center, y_pos, 'DNF', color='#E24A33', rotation=90, 
-                            ha='center', va='bottom', fontweight='bold', fontsize=22)
+                            ha='center', va='bottom', fontweight='bold', fontsize=12)
 
                 mcp_x.append(x_center)
                 mcp_y.append(mcp_val)
@@ -208,7 +210,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
             # Print DNF if it failed completely without duration data
             elif dnf:
                 ax.text(x_center, 10, 'DNF', color='#E24A33', rotation=90, 
-                        ha='center', va='bottom', fontweight='bold', fontsize=22)
+                        ha='center', va='bottom', fontweight='bold', fontsize=12)
 
             # Unconditionally advance the X position to keep structural gaps
             current_x += (bar_width + inter_config_spacing)
@@ -216,7 +218,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
         query_end_x = current_x - inter_config_spacing
         group_center_x = (query_start_x + query_end_x) / 2
         
-        ax.text(group_center_x, 275, query, ha='center', va='center', fontweight='bold', fontsize=26)
+        ax.text(group_center_x, 370, query, ha='center', va='center', fontweight='bold', fontsize=14)
         
         if q_idx < len(QUERIES) - 1:
             separator_x = query_end_x + inter_query_spacing / 2
@@ -225,21 +227,19 @@ def plot_single_paper(paper_name, paper_data, output_path):
         current_x += inter_query_spacing
         
     if mcp_x:
-        ax2.scatter(mcp_x, mcp_y, marker='D', s=20, color='#800080', edgecolor='#FFD700', linewidth=1.0, zorder=10)
+        ax2.scatter(mcp_x, mcp_y, marker='D', s=20, color='#A078C4', edgecolor='black', linewidth=0.5, zorder=10)
 
     ax.set_xticks(x_positions)
-    ax.set_xticklabels(x_labels, fontweight='bold', fontsize=20)
-    ax.tick_params(axis='y', labelsize=20)
-    ax.set_ylabel('Avg. Time (seconds)', fontweight='bold', fontsize=22)
+    ax.set_xticklabels(x_labels, fontweight='bold', fontsize=12)
+    ax.set_ylabel('Avg. Time (seconds)', fontweight='bold', fontsize=14)
     ax.set_ylim(0, MAX_LATENCY)
     ax.yaxis.set_major_locator(MultipleLocator(100))
-    ax.yaxis.set_minor_locator(MultipleLocator(20))
+    ax.yaxis.set_minor_locator(MultipleLocator(10))
     ax.grid(axis='y', which='major', linestyle='-', alpha=0.6, color='lightgray', linewidth=1.0)
     ax.grid(axis='y', which='minor', linestyle='--', alpha=0.3, color='lightgray', linewidth=0.5)
     ax.set_axisbelow(True)
 
-    ax2.tick_params(axis='y', labelsize=20)
-    ax2.set_ylabel('Avg. MCP Tool Calls', fontweight='bold', fontsize=22)
+    ax2.set_ylabel('Avg. MCP Tool Calls', fontweight='bold', fontsize=14)
     ax2.set_ylim(0, MAX_MCP)
     if is_log:
         ax2.yaxis.set_major_locator(MultipleLocator(5))
@@ -247,6 +247,16 @@ def plot_single_paper(paper_name, paper_data, output_path):
     else:
         ax2.yaxis.set_major_locator(MultipleLocator(2))
         ax2.yaxis.set_minor_locator(MultipleLocator(0.5))
+    
+    legend_elements = [
+        Rectangle((0, 0), 1, 1, facecolor=get_agent_color(base_color, 'plan'), edgecolor='black', label='Plan (Light)'),
+        Rectangle((0, 0), 1, 1, facecolor=get_agent_color(base_color, 'act'), edgecolor='black', label='Act (Medium)'),
+        Rectangle((0, 0), 1, 1, facecolor=get_agent_color(base_color, 'evaluate'), edgecolor='black', label='Evaluate (Dark)'),
+        Line2D([0], [0], marker='D', color='w', markerfacecolor='#A078C4', markeredgecolor='black', markersize=6, label='MCP Tool Calls')
+    ]
+    ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(0, 1.15), ncol=4, framealpha=1, edgecolor='black', fontsize=10)
+    
+    plt.figtext(0.5, -0.05, f"{paper_name}", ha="center", fontsize=14, fontweight='bold')
     
     plt.tight_layout()
     plt.savefig(output_path, format='pdf', dpi=300, bbox_inches='tight')
@@ -274,9 +284,16 @@ def main():
         'MC': args.mc
     }
 
+    base_color = PAPER_COLORS.get(args.paper.replace(' ', ''), '#4472C4') 
+    
+    if not args.out:
+        safe_title = args.paper.replace(' ', '_')
+        args.out = str(Path(__file__).parent / "plots" / f"{safe_title}_{args.agent_type}.pdf")
+
+
     paper_data = load_data(files_by_config)
     
-    plot_single_paper(args.paper, paper_data, args.out)
+    plot_single_paper(args.paper, paper_data, base_color, args.out)
 
 if __name__ == "__main__":
     main()

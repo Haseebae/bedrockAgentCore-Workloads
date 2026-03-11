@@ -9,6 +9,8 @@ import sys
 import logging
 import contextvars
 import uuid
+import time
+import psutil
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -22,8 +24,6 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from langgraph_checkpoint_aws import AgentCoreMemorySaver
 
 from common.logging_callback import SessionMetricsCallback
-
-from prompts import EVALUATOR_PROMPT
 
 # ==================== LOGGING ====================
 
@@ -53,13 +53,9 @@ class EvalResult(BaseModel):
 # ==================== AGENT STATE & GRAPH ====================
 
 class EvaluatorState(MessagesState):
-    original_task: str
-    plan: str
-    execution: str
-    iteration_count: Optional[int]
-    max_iterations: Optional[int]
+    evaluation: Optional[dict[str, Any]]
     step_count: Optional[int]
-    evaluation: Optional[dict]
+    iteration_count: Optional[int]
 
 
 def build_agent():
@@ -70,21 +66,10 @@ def build_agent():
     def evaluator_node(state: EvaluatorState):
         current_node_var.set("evaluator")
         messages = state["messages"]
-        step_count = (state.get("step_count") or 0) + 1
-        plan_json = state.get("plan", "{}")
-        iteration_count = state.get("iteration_count", 1)
-        max_iterations = state.get("max_iterations", 3)
+        step_count = state["step_count"] + 1
+        iteration_count = state["iteration_count"]
 
-        result_json = state.get("execution", "")
-
-        system_msg_content = EVALUATOR_PROMPT.format(
-            plan_json=plan_json,
-            result_json=result_json,
-            iteration_count=iteration_count,
-            max_iterations=max_iterations
-        )
-        system_msg = SystemMessage(content=system_msg_content)
-        eval_result = evaluator_model.invoke([system_msg] + messages)
+        eval_result = evaluator_model.invoke(messages)
 
         metric_logger.info(json.dumps({
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
@@ -94,10 +79,10 @@ def build_agent():
             "step_count": step_count,
             "trace_id": trace_id_var.get(),
             "session_id": session_id_var.get(),
-            "orchestrator_state_id": state_id_var.get(),
+            "state_id": state_id_var.get(),
             "local_state_id": local_state_id_var.get(),
             "message_len": len(messages),
-            "request": system_msg_content,
+            "request": "",
             "response": str(eval_result.model_dump())[:1000]
         }))
 
@@ -138,14 +123,14 @@ app = BedrockAgentCoreApp()
 def handle(payload):
     """
     Payload contract:
-      IN:  {original_task, plan, execution, session_id, trace_id, state_id, actor_id,
-            memory_config, agent_state: {iteration_count, step_count}}
+      IN:  {original_task, plan, execution, session_id, trace_id, orchestrator_state_id,
+            actor_id, memory_config, thread_id, workload_type, s3_enabled,
+            agent_state: {iteration_count, step_count}}
       OUT: {response: JSON {status, feedback, success, needs_retry, reason},
             agent_state: {iteration_count, step_count}}
     """
+    start_time = time.time()
     original_task = payload.get("original_task", "")
-    plan = payload.get("plan", "")
-    execution = payload.get("execution", "")
     session_id = payload.get("session_id", "default_session_id")
     trace_id = payload.get("trace_id", uuid.uuid4().hex)
     orchestrator_state_id = payload.get("orchestrator_state_id", uuid.uuid4().hex)
@@ -182,16 +167,16 @@ def handle(payload):
     }
 
     iteration_count = agent_state.get("iteration_count", 1)
-    max_iterations = 3
+
+    # Store initial memory using psutil
+    process = psutil.Process()
+    initial_mem = process.memory_info().rss
 
     result = agent.invoke({
         "messages": [HumanMessage(content=original_task)],
-        "original_task": original_task,
-        "plan": plan,
-        "execution": execution,
         "iteration_count": iteration_count,
-        "max_iterations": max_iterations,
         "step_count": agent_state.get("step_count", 0),
+        "evaluation": None,
     }, config=config)
 
     evaluation = result.get("evaluation", {})
@@ -203,6 +188,26 @@ def handle(payload):
         "iteration_count": iteration_count,
         "step_count": result.get("step_count", agent_state.get("step_count", 0)),
     }
+
+    # Capture peak memory using psutil
+    final_mem = process.memory_info().rss
+    peak_mem = max(initial_mem, final_mem)
+    peak_memory_gb = peak_mem / (1024 * 1024 * 1024)
+
+    end_time = time.time()
+    wall_clock_time = end_time - start_time
+
+    metric_logger.info(json.dumps({
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+        "event_type": "billing_metrics",
+        "session_id": session_id,
+        "trace_id": trace_id,
+        "state_id": orchestrator_state_id,
+        "local_state_id": local_state_id,
+        "peak_memory_gb": round(peak_memory_gb, 4),
+        "step_count": result.get("step_count", 0),
+        "wall_clock_s": round(wall_clock_time, 4)
+    }))
 
     return {
         "response": json.dumps({

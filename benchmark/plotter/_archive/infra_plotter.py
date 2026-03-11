@@ -151,7 +151,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
     x_positions = np.arange(len(CONFIG_ORDER))
     
     is_log = "log" in paper_name.lower()
-    max_y = 2.0
+    max_y = 5.0
     
     # --- Value logging ---
     exceeds_list = []
@@ -167,32 +167,34 @@ def plot_single_paper(paper_name, paper_data, output_path):
         ax.set_xlim(-0.5, len(CONFIG_ORDER) - 0.5)
         
         # Adding Grids and Ticks
-        ax.yaxis.set_major_locator(MultipleLocator(0.5))
-        ax.yaxis.set_minor_locator(MultipleLocator(0.1))
+        if is_log:
+            ax.yaxis.set_major_locator(MultipleLocator(1.25))
+            ax.yaxis.set_minor_locator(MultipleLocator(0.25))
+        else:
+            ax.yaxis.set_major_locator(MultipleLocator(1.0))
+            ax.yaxis.set_minor_locator(MultipleLocator(0.25))
         ax.grid(axis='y', which='major', linestyle='-', alpha=0.5, color='gray')
         ax.grid(axis='y', which='minor', linestyle=':', alpha=0.3, color='gray')
-        ax.tick_params(axis='y', labelsize=20)
         ax.set_axisbelow(True)
         
         # Query Titles - centered over the bar group
         group_center = (x_positions[0] + x_positions[-1]) / 2
-        query_y = 1.95
+        query_y = 4.8
         ax.text(group_center, query_y, query, ha='center', va='top', fontweight='bold', fontsize=18)
         
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(CONFIG_ORDER, fontweight='bold', fontsize=20)
+        ax.set_xticklabels(CONFIG_ORDER, fontweight='bold', fontsize=16)
         
         # Add labels & Legend on the primary axis (First Panel)
         if i == 0:
             ax.set_ylabel('Avg. Cost (cents)', fontweight='bold', fontsize=18)
-            if "Paper 1" in paper_name:
-                legend_elements = [
-                    Line2D([0], [0], color=C_LLM, lw=8, label='LLM Cost'),
-                    Line2D([0], [0], color=C_AGENT, lw=8, label='AgentCore Pricing'),
-                    Line2D([0], [0], color=C_MCP, lw=8, label='MCP Lambda Cost')
-                ]
-                ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(0.02, 0.93), 
-                          fontsize=15, framealpha=1, edgecolor='gray')
+            legend_elements = [
+                Line2D([0], [0], color=C_LLM, lw=8, label='LLM Cost'),
+                Line2D([0], [0], color=C_AGENT, lw=8, label='AgentCore Pricing'),
+                Line2D([0], [0], color=C_MCP, lw=8, label='MCP Lambda Cost')
+            ]
+            ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(0.02, 0.85), 
+                      fontsize=13, framealpha=1, edgecolor='gray')
 
         # Stack the Bars 
         for j, config in enumerate(CONFIG_ORDER):
@@ -226,12 +228,15 @@ def plot_single_paper(paper_name, paper_data, output_path):
             if dnf:
                 total_h = llm + agent + mcp
                 ax.text(j, total_h + 0.05, 'DNF', color='#E13E28', rotation=90, 
-                        ha='center', va='bottom', fontweight='bold', fontsize=26)
+                        ha='center', va='bottom', fontweight='bold', fontsize=18)
         
         for spine in ax.spines.values():
             spine.set_edgecolor('gray')
             spine.set_linewidth(1)
 
+    plt.figtext(0.5, -0.05, f"{paper_name}", 
+                ha="center", fontsize=20, fontweight='bold', fontfamily='serif')
+    
     plt.savefig(output_path, format='pdf', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Cost plot saved successfully to: {output_path}")

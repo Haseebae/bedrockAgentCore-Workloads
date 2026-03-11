@@ -12,42 +12,16 @@ CONFIG_ORDER = ['E', 'N', 'C', 'M', 'MC']
 QUERIES = ['Query1', 'Query2', 'Query3']
 
 # Color mapping matched to the original image's look
-QUERY_COLORS = {
-    'Query1': {
-        'input': {
-            'plan': '#8DA0CB',      # Medium light blue
-            'act': '#B3CDE3',       # Lighter blue
-            'evaluate': '#DAE8F5'   # Very light blue
-        },
-        'output': {
-            'plan': '#4472C4',      # Medium dark blue
-            'act': '#1F497D',       # Dark blue
-            'evaluate': '#151515'   # Nearly black
-        }
+COLORS = {
+    'input': {
+        'plan': '#8DA0CB',      # Light Blue
+        'act': '#4472C4',       # Medium Blue
+        'evaluate': '#1F497D'   # Dark Blue
     },
-    'Query2': {
-        'input': {
-            'plan': '#F4B183',      # Medium light tan
-            'act': '#F8CBAD',       # Lighter tan
-            'evaluate': '#FCE4D6'   # Very light tan
-        },
-        'output': {
-            'plan': '#C55A11',      # Medium brown
-            'act': '#833C0C',       # Dark brown
-            'evaluate': '#582C09'   # Dark brown/black
-        }
-    },
-    'Query3': {
-        'input': {
-            'plan': '#A9D18E',      # Medium light sage green
-            'act': '#C6E0B4',       # Lighter green
-            'evaluate': '#E2EFDA'   # Very light green
-        },
-        'output': {
-            'plan': '#548235',      # Medium olive green
-            'act': '#375623',       # Dark green
-            'evaluate': '#2B4219'   # Dark green/black
-        }
+    'output': {
+        'plan': '#B3CDE3',      # Light Navy/Grey
+        'act': '#315B7E',       # Navy
+        'evaluate': '#151515'   # Very Dark Navy/Black
     }
 }
 
@@ -182,9 +156,14 @@ def plot_token_data(paper_name, paper_data, output_path):
     
     axes_input = [main_ax]
     
-    MAX_INPUT_TOKENS = 100000
-    MAX_OUTPUT_TOKENS = 8000
-    MAX_COST = 2.00
+    if is_log:
+        MAX_INPUT_TOKENS = 210000
+        MAX_OUTPUT_TOKENS = 16000
+        MAX_COST = 5.00
+    else:
+        MAX_INPUT_TOKENS = 175000
+        MAX_OUTPUT_TOKENS = 16000
+        MAX_COST = 5.00
 
     # --- Refactored Visual Layout Configuration ---
     bar_width = 0.25
@@ -250,7 +229,7 @@ def plot_token_data(paper_name, paper_data, output_path):
                     if val > 0:
                         for ax_i in axes_input:
                             ax_i.bar(x_input, val, width=bar_width, bottom=inp_bottom, 
-                                     color=QUERY_COLORS[query]['input'][agent], edgecolor='black')
+                                     color=COLORS['input'][agent], edgecolor='black')
                         inp_bottom += val
                 
                 # Plot Stacked Output Tokens
@@ -259,7 +238,7 @@ def plot_token_data(paper_name, paper_data, output_path):
                     val = query_metrics.get(agent, {}).get('out', 0)
                     if val > 0:
                         ax2.bar(x_output, val, width=bar_width, bottom=out_bottom, 
-                                color=QUERY_COLORS[query]['output'][agent], edgecolor='black')
+                                color=COLORS['output'][agent], edgecolor='black')
                         out_bottom += val
                         
                 # Plot Cost marker
@@ -272,7 +251,7 @@ def plot_token_data(paper_name, paper_data, output_path):
                     y_pos = inp_bottom + 4000 if inp_bottom > 0 else 10000
                     target_ax = main_ax
                     target_ax.text(x_center, y_pos, 'DNF', color='#E24A33', rotation=90, 
-                            ha='center', va='bottom', fontweight='bold', fontsize=26)
+                            ha='center', va='bottom', fontweight='bold', fontsize=18)
 
             # Advance x position regardless of missing data
             current_x += (bar_width * 2 + intra_config_spacing + inter_config_spacing)
@@ -282,8 +261,8 @@ def plot_token_data(paper_name, paper_data, output_path):
         group_center_x = (query_start_x + query_end_x) / 2
         
         # Place Query label correctly centered
-        query_y = 90000
-        main_ax.text(group_center_x, query_y, query, ha='center', va='center', fontweight='bold', fontsize=28)
+        query_y = 205000 if is_log else 165000
+        main_ax.text(group_center_x, query_y, query, ha='center', va='center', fontweight='bold', fontsize=18)
         
         # Add vertical divider midway through the inter_query_spacing
         if q_idx < len(QUERIES) - 1:
@@ -295,18 +274,26 @@ def plot_token_data(paper_name, paper_data, output_path):
 
     # Axes Setup
     main_ax.set_ylim(0, MAX_INPUT_TOKENS)
-    main_ax.yaxis.set_major_locator(MultipleLocator(25000))
-    main_ax.yaxis.set_minor_locator(MultipleLocator(5000))
-    main_ax.set_ylabel('Avg. Input Tokens', fontweight='bold', fontsize=24)
+    if is_log:
+        main_ax.yaxis.set_major_locator(MultipleLocator(50000))
+        main_ax.yaxis.set_minor_locator(MultipleLocator(10000))
+    else:
+        main_ax.yaxis.set_major_locator(MultipleLocator(25000))
+        main_ax.yaxis.set_minor_locator(MultipleLocator(5000))
+    main_ax.set_ylabel('Avg. Input Tokens', fontweight='bold', fontsize=16)
 
     ax2.set_ylim(0, MAX_OUTPUT_TOKENS)
-    ax2.yaxis.set_major_locator(MultipleLocator(2000))
-    ax2.yaxis.set_minor_locator(MultipleLocator(500))
-    ax2.set_ylabel('Avg. Output Tokens', fontweight='bold', fontsize=24)
+    if is_log:
+        ax2.yaxis.set_major_locator(MultipleLocator(4000))
+        ax2.yaxis.set_minor_locator(MultipleLocator(1000))
+    else:
+        ax2.yaxis.set_major_locator(MultipleLocator(4000))
+        ax2.yaxis.set_minor_locator(MultipleLocator(1000))
+    ax2.set_ylabel('Avg. Output Tokens', fontweight='bold', fontsize=16)
 
     ax3.set_ylim(0, MAX_COST)
     ax3.yaxis.set_major_locator(MultipleLocator(0.50))
-    ax3.set_ylabel('LLM Cost (cents)', fontweight='bold', fontsize=24)
+    ax3.set_ylabel('LLM Cost (cents)', fontweight='bold', fontsize=16)
 
     # Formatters
     k_formatter = FuncFormatter(format_k)
@@ -317,20 +304,34 @@ def plot_token_data(paper_name, paper_data, output_path):
 
     # Parameters & Grid
     for ax_i in axes_input:
-        ax_i.tick_params(axis='both', which='major', labelsize=24)
+        ax_i.tick_params(axis='both', which='major', labelsize=14)
         ax_i.grid(axis='y', which='major', linestyle='-', alpha=0.5, color='gray')
         ax_i.grid(axis='y', which='minor', linestyle='--', alpha=0.2, color='gray')
         ax_i.set_axisbelow(True)
     
-    ax2.tick_params(axis='y', which='major', labelsize=24)
-    ax3.tick_params(axis='y', which='major', labelsize=24)
+    ax2.tick_params(axis='y', which='major', labelsize=14)
+    ax3.tick_params(axis='y', which='major', labelsize=14)
     ax2.set_axisbelow(True)
 
     # X-axis Labels
     main_ax.set_xticks(x_positions_center)
-    main_ax.set_xticklabels(x_labels, fontweight='bold', fontsize=20)
+    main_ax.set_xticklabels(x_labels, fontweight='bold', fontsize=14)
 
-    plt.tight_layout()
+    # Custom Legend
+    legend_elements = [
+        Rectangle((0, 0), 1, 1, facecolor=COLORS['input']['plan'], edgecolor='black', label='Input: Planner'),
+        Rectangle((0, 0), 1, 1, facecolor=COLORS['output']['plan'], edgecolor='black', label='Output: Planner'),
+        Rectangle((0, 0), 1, 1, facecolor=COLORS['input']['act'], edgecolor='black', label='Input: Actor'),
+        Rectangle((0, 0), 1, 1, facecolor=COLORS['output']['act'], edgecolor='black', label='Output: Actor'),
+        Rectangle((0, 0), 1, 1, facecolor=COLORS['input']['evaluate'], edgecolor='black', label='Input: Evaluator'),
+        Rectangle((0, 0), 1, 1, facecolor=COLORS['output']['evaluate'], edgecolor='black', label='Output: Evaluator'),
+        Line2D([0], [0], marker='D', color='w', markerfacecolor='#D4B483', markeredgecolor='black', markersize=8, label='Cost'),
+    ]
+    axes_input[0].legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, 1.15), 
+              ncol=4, framealpha=1, edgecolor='black', fontsize=12)
+    
+    plt.figtext(0.5, -0.05, f"{paper_name}", ha="center", fontsize=20, fontweight='bold')
+    
     plt.tight_layout()
     plt.savefig(output_path, format='pdf', dpi=300, bbox_inches='tight')
     plt.close()

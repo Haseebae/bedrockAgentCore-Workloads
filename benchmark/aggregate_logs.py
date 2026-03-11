@@ -1,6 +1,7 @@
 import os
 import json
 import pandas as pd
+import argparse
 from collections import defaultdict
 from datetime import datetime
 
@@ -8,6 +9,13 @@ base_log_dir = os.getenv("BASE_LOG_DIR", "/Users/haseeb/Code/iisc/bedrockAC/benc
 log_ext = os.getenv("AGG_LOG_EXT", "2026-03-10")
 base_dir = os.path.join(base_log_dir, log_ext)
 dirs = []
+for dir in os.listdir(base_dir):
+    if dir != "_archive":
+        dirs.append(os.path.join(base_dir, dir))
+
+print(len(dirs))
+log_ext = "2026-03-11"
+base_dir = os.path.join(base_log_dir, log_ext)
 for dir in os.listdir(base_dir):
     if dir != "_archive":
         dirs.append(os.path.join(base_dir, dir))
@@ -100,12 +108,15 @@ def extract_metrics_from_data(data, run_path):
                     
     return records
 
-def aggregate_batch(batch_name, run_paths):
+def aggregate_batch(batch_name, run_paths, if_checkpointer=False):
     """
     Aggregates metrics for a single batch.
     - Inside a log file: sums metrics per (query_number, node_name).
     - Across log files: averages metrics per (query_number, node_name).
     """
+    parts = batch_name.split("-")
+    memory_val = parts[2].replace("memory_", "") if len(parts) > 2 and parts[2].startswith("memory_") else "unknown"
+
     all_records = []
     file_paths = []
     session_ids = []
@@ -181,6 +192,9 @@ def aggregate_batch(batch_name, run_paths):
                 gb_cents = (wall_clock * peak_memory * 0.00945 / 3600) * 100
                 memory_cents = ((1 + step_count) * 0.25 / 1000) * 100
                 
+                if not if_checkpointer and memory_val.lower() in ["e", "n", "empty", "naive"]:
+                    memory_cents = 0.0
+                
                 total_vcpu_cents += vcpu_cents
                 total_gb_cents += gb_cents
                 total_memory_cents += memory_cents
@@ -225,10 +239,9 @@ def aggregate_batch(batch_name, run_paths):
     final_aggregated = final_aggregated.sort_values(by=["query_number", "node_name"])
     
     # Parse log_metadata from batch_name (e.g., arxiv-batch_1-memory_e-cache_false)
-    parts = batch_name.split("-")
     workload = parts[0] if len(parts) > 0 else "unknown"
     batch_val = parts[1].replace("batch_", "") if len(parts) > 1 and parts[1].startswith("batch_") else "unknown"
-    memory_val = parts[2].replace("memory_", "") if len(parts) > 2 and parts[2].startswith("memory_") else "unknown"
+    # memory_val already extracted above
     s3_val = parts[3].replace("s3_", "") if len(parts) > 3 and parts[3].startswith("s3_") else "unknown"
     cache_val = parts[4].replace("cache_", "") if len(parts) > 4 and parts[4].startswith("cache_") else "unknown"
     
@@ -319,13 +332,17 @@ def aggregate_batch(batch_name, run_paths):
     print(f" Saved LOG to {log_path}")
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--if_checkpointer", action="store_true", help="If true, sets memory_events_cents to 0 for E/N memory configs.")
+    args = parser.parse_args()
+
     print("Discovering workload batches...")
     batches = manually_create_workloads()
     print(f"Found {len(batches)} batches.")
     
     for batch_name, run_paths in batches.items():
         if len(run_paths) > 0:
-            aggregate_batch(batch_name, run_paths)
+            aggregate_batch(batch_name, run_paths, if_checkpointer=args.if_checkpointer)
 
 if __name__ == "__main__":
     main()

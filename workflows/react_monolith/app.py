@@ -152,7 +152,7 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
         result = tools_runnable.invoke(state)
         
         iteration_count = state.get("iteration_count")
-        step_count = state.get("step_count")
+        step_count = state.get("step_count") + 1
         
         request_str = ""
         last_message = state["messages"][-1]

@@ -10,7 +10,7 @@ set -e
 echo "Deploying React Monolith..."
 
 agentcore deploy --local-build \
-    --env OPENAI_API_KEY="${OPENAI_API_KEY2}" \
+    --env OPENAI_API_KEY="${OPENAI_API_KEY}" \
     --env ARXIV_SERVER_A="${ARXIV_SERVER_A}" \
     --env ARXIV_SERVER_B="${ARXIV_SERVER_B}" \
     --env ARXIV_CACHED_SERVER_A="${ARXIV_CACHED_SERVER_A}" \

@@ -9,10 +9,10 @@ import sys
 import logging
 import contextvars
 import uuid
+import time
+import psutil
 from datetime import datetime, timezone
 from typing import Any, Optional
-
-import boto3
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.chat_models import init_chat_model
@@ -42,94 +42,62 @@ trace_id_var = contextvars.ContextVar("trace_id", default="unknown_trace")
 state_id_var = contextvars.ContextVar("state_id", default="unknown_state")
 local_state_id_var = contextvars.ContextVar("local_state_id", default="unknown_local_state")
 
-# ==================== TOOL DISCOVERY ====================
-
-_tool_catalog_str = None
-_all_tools = None
-
-def _discover_tools():
-    """Discover available tools from MCP servers and cache them."""
-    global _tool_catalog_str, _all_tools
-    if _all_tools is not None:
-        return _all_tools, _tool_catalog_str
-
-    server_urls = MCPClient.get_mcp_servers_from_env()
-    _all_tools = mcp_tools_from_multiple_servers(
-        server_urls, session_id_var, metric_logger, trace_id_var, state_id_var
-    )
-
-    if _all_tools:
-        _tool_catalog_str = "\n".join(
-            [f"- {tool.name}: {tool.description}" for tool in _all_tools]
-        )
-    else:
-        _tool_catalog_str = "  (no tools discovered)"
-
-    return _all_tools, _tool_catalog_str
-
-
 # ==================== AGENT STATE & GRAPH ====================
 
 class PlannerState(MessagesState):
+    evaluation: Optional[dict[str, Any]]
     plan: Optional[str]
     iteration_count: Optional[int]
     step_count: Optional[int]
 
 
-def build_agent():
+def build_agent(workload_type="arxiv", s3_enabled=False):
+    server_urls = MCPClient.get_mcp_servers_for_workload(workload_type, s3_enabled)
+    if not server_urls:
+        raise ValueError(f"No MCP servers found for workload_type={workload_type}, s3_enabled={s3_enabled}")
+    all_tools = mcp_tools_from_multiple_servers(
+        server_urls, session_id_var, metric_logger, trace_id_var, state_id_var
+    )
+
     model_name = os.environ.get("MODEL_NAME", "openai:gpt-4o-mini")
     model = init_chat_model(model_name)
 
     def planner_node(state: PlannerState):
         current_node_var.set("planner")
         messages = state["messages"]
-        iteration_count = (state.get("iteration_count") or 0) + 1
-        step_count = (state.get("step_count") or 0) + 1
+        iteration_count = state["iteration_count"] + 1
+        step_count = state["step_count"] + 1
 
-        try:
-            _, tools_description = _discover_tools()
-            system_msg_content = PLANNER_PROMPT.format(tools_description=tools_description)
+        tools_description = "\n".join([f"- {tool.name}: {tool.description}" for tool in all_tools])
+        system_msg_content = PLANNER_PROMPT.format(tools_description=tools_description)
 
-            # Include feedback from previous failed attempt
-            if state.get("evaluation_feedback"):
-                system_msg_content += f"\n\nPrevious attempt failed. Feedback:\n{state['evaluation_feedback']}"
+        if state.get("evaluation") and state["evaluation"].get("feedback"):
+            system_msg_content += f"\n\nPrevious attempt failed. Feedback:\n{state['evaluation']['feedback']}"
 
-            system_msg = SystemMessage(content=system_msg_content)
-            response = model.invoke([system_msg] + messages)
+        system_msg = SystemMessage(content=system_msg_content)
+        response = model.invoke([system_msg] + messages)
 
-            metric_logger.info(json.dumps({
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
-                "event_type": "debug",
-                "node_name": "planner",
-                "iteration_count": iteration_count,
-                "step_count": step_count,
-                "trace_id": trace_id_var.get(),
-                "session_id": session_id_var.get(),
-                "orchestrator_state_id": state_id_var.get(),
-                "local_state_id": local_state_id_var.get(),
-                "message_len": len(messages),
-                "request": system_msg_content,
-                "response": str(response.model_dump())[:1000]
-            }))
+        metric_logger.info(json.dumps({
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+            "event_type": "debug",
+            "node_name": "planner",
+            "iteration_count": iteration_count,
+            "step_count": step_count,
+            "trace_id": trace_id_var.get(),
+            "session_id": session_id_var.get(),
+            "state_id": state_id_var.get(),
+            "local_state_id": local_state_id_var.get(),
+            "message_len": len(messages),
+            "request": system_msg_content,
+            "response": str(response.model_dump())[:1000]
+        }))
 
-            return {
-                "messages": [response],
-                "plan": response.content,
-                "iteration_count": iteration_count,
-                "step_count": step_count,
-            }
-        except Exception as e:
-            metric_logger.error(json.dumps({
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
-                "event_type": "error",
-                "node_name": "planner",
-                "trace_id": trace_id_var.get(),
-                "session_id": session_id_var.get(),
-                "orchestrator_state_id": state_id_var.get(),
-                "local_state_id": local_state_id_var.get(),
-                "error": str(e)
-            }))
-            raise
+        return {
+            "messages": [response],
+            "plan": response.content,
+            "iteration_count": iteration_count,
+            "step_count": step_count,
+        }
 
     graph = StateGraph(PlannerState)
     graph.add_node("planner", planner_node)
@@ -148,13 +116,17 @@ def build_agent():
 
 # ==================== ENTRYPOINT ====================
 
-_agent = None
+_agent_cache = {}
 
-def _get_agent():
-    global _agent
-    if _agent is None:
-        _agent = build_agent()
-    return _agent
+def _get_agent(workload_type="arxiv", s3_enabled=False):
+    global _agent_cache
+    cache_key = (workload_type, s3_enabled)
+    if cache_key not in _agent_cache:
+        _agent_cache[cache_key] = build_agent(
+            workload_type=workload_type,
+            s3_enabled=s3_enabled
+        )
+    return _agent_cache[cache_key]
 
 
 app = BedrockAgentCoreApp()
@@ -164,9 +136,11 @@ def handle(payload):
     """
     Payload contract:
       IN:  {prompt, session_id, trace_id, state_id, actor_id, memory_config, thread_id,
+            workload_type, s3_enabled,
             agent_state: {iteration_count, step_count}, feedback, previous_plan}
       OUT: {response: <plan text>, agent_state: {iteration_count, step_count}}
     """
+    start_time = time.time()
     prompt = payload.get("prompt", "Hello!")
     session_id = payload.get("session_id", "default_session_id")
     trace_id = payload.get("trace_id", uuid.uuid4().hex)
@@ -174,6 +148,8 @@ def handle(payload):
     actor_id = payload.get("actor_id", "default_actor_id")
     memory_config = payload.get("memory_config", "empty")
     thread_id = payload.get("thread_id", trace_id)
+    workload_type = payload.get("workload_type", "arxiv")
+    s3_enabled = payload.get("s3_enabled", False)
     agent_state = payload.get("agent_state", {"iteration_count": 0, "step_count": 0})
     feedback = payload.get("feedback")
     previous_plan = payload.get("previous_plan")
@@ -188,7 +164,10 @@ def handle(payload):
     if not os.environ.get("OPENAI_API_KEY"):
         return {"error": "OPENAI_API_KEY not set"}
 
-    agent = _get_agent()
+    agent = _get_agent(
+        workload_type=workload_type,
+        s3_enabled=s3_enabled
+    )
 
     config = {
         "callbacks": [SessionMetricsCallback(
@@ -205,12 +184,21 @@ def handle(payload):
         }
     }
 
+    # Build evaluation dict from feedback (matching monolith pattern)
+    evaluation = None
+    if feedback:
+        evaluation = {"feedback": feedback}
+
+    # Store initial memory using psutil
+    process = psutil.Process()
+    initial_mem = process.memory_info().rss
+
     result = agent.invoke({
         "messages": [HumanMessage(content=prompt)],
         "iteration_count": agent_state.get("iteration_count", 0),
         "step_count": agent_state.get("step_count", 0),
         "plan": previous_plan,
-        "evaluation_feedback": feedback,
+        "evaluation": evaluation,
     }, config=config)
 
     plan = result.get("plan", "")
@@ -218,6 +206,26 @@ def handle(payload):
         "iteration_count": result.get("iteration_count", 1),
         "step_count": result.get("step_count", 1),
     }
+
+    # Capture peak memory using psutil
+    final_mem = process.memory_info().rss
+    peak_mem = max(initial_mem, final_mem)
+    peak_memory_gb = peak_mem / (1024 * 1024 * 1024)
+
+    end_time = time.time()
+    wall_clock_time = end_time - start_time
+
+    metric_logger.info(json.dumps({
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+        "event_type": "billing_metrics",
+        "session_id": session_id,
+        "trace_id": trace_id,
+        "state_id": orchestrator_state_id,
+        "local_state_id": local_state_id,
+        "peak_memory_gb": round(peak_memory_gb, 4),
+        "step_count": result.get("step_count", 0),
+        "wall_clock_s": round(wall_clock_time, 4)
+    }))
 
     return {
         "response": plan,

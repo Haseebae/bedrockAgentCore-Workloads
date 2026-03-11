@@ -27,4 +27,7 @@ wheels/
 # Config files
 config.yaml
 
+key_tester.py
+update_mcp_lambda_keys.py
+
 
