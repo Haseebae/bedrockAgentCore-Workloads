@@ -20,7 +20,7 @@ def query_cloudwatch_structured_logs(region, start_time, end_time, session_id, e
 
     query = f"""
     fields @timestamp, @message
-    | filter event_type in ["llm_call", "mcp_tool_execution", "psutil_metrics_node", "psutil_metrics_graph"]
+    | filter event_type in ["llm_call", "mcp_tool_execution", "billing_metrics"]
     | filter session_id = "{session_id}"
     | sort @timestamp asc
     """
@@ -76,20 +76,19 @@ def _inject_eval_data(metrics, eval_data_map):
         "max_iterations": -1
     }
 
-    for qid, query_data in metrics.get("queries", {}).items():
-        for iter_key, trace_data in query_data.get("traces", {}).items():
-            trace_id = trace_data.get("trace_id")
-            if trace_id:
-                eval_data = eval_data_map.get(trace_id, {})
-                if not eval_data:
-                    eval_data = default_eval_data
-                    
-                new_trace_data = {"trace_id": trace_id}
-                new_trace_data.update(eval_data)
-                if "psutil_metrics" in trace_data:
-                    new_trace_data["psutil_metrics"] = trace_data["psutil_metrics"]
-                new_trace_data["graphs"] = trace_data.get("graphs", [])
-                metrics["queries"][qid]["traces"][iter_key] = new_trace_data
+    for iter_key, trace_data in metrics.get("traces", {}).items():
+        trace_id = trace_data.get("trace_id")
+        if trace_id:
+            eval_data = eval_data_map.get(trace_id, {})
+            if not eval_data:
+                eval_data = default_eval_data
+                
+            new_trace_data = {"trace_id": trace_id}
+            new_trace_data.update(eval_data)
+            if "billing_metrics" in trace_data:
+                new_trace_data["billing_metrics"] = trace_data["billing_metrics"]
+            new_trace_data["graphs"] = trace_data.get("graphs", [])
+            metrics["traces"][iter_key] = new_trace_data
     return metrics
 
 
@@ -99,35 +98,28 @@ def _build_metrics(events, session_id, app_name=None, memory_config=None, worklo
     # Sort by the explicitly parsed timestamp or fall back to empty string
     events.sort(key=lambda x: str(x.get("timestamp", "")))
 
-    # Phase 0: Group events by query_id and then trace_id
-    query_groups = {}
+    # Phase 0: Group events by trace_id (each trace_id = one iteration/query)
+    trace_groups = {}
+    unknown_counter = 0
     for ev in events:
-        qid = ev.get("query_id", "unknown_query")
-        tid = ev.get("trace_id", "unknown_trace")
-        
-        if qid not in query_groups:
-            query_groups[qid] = {}
-        if tid not in query_groups[qid]:
-            query_groups[qid][tid] = []
-        query_groups[qid][tid].append(ev)
+        tid = ev.get("trace_id", None)
+        if not tid or tid == "unknown_trace":
+            unknown_counter += 1
+            tid = f"unknown_{unknown_counter}"
+        if tid not in trace_groups:
+            trace_groups[tid] = []
+        trace_groups[tid].append(ev)
 
-    queries = {}
-    for qid, traces in query_groups.items():
-        query_traces = {}
-        # Sort traces by timestamp of their first event
-        sorted_tids = sorted(traces.keys(), key=lambda t: traces[t][0].get("timestamp", ""))
+    iterations = {}
+    for iter_idx, (trace_id, trace_events) in enumerate(trace_groups.items(), start=1):
+        billing_events = [e for e in trace_events if e.get("event_type") == "billing_metrics"]
+        graph_events = [e for e in trace_events if e.get("event_type") != "billing_metrics"]
         
-        for i, tid in enumerate(sorted_tids, start=1):
-            trace_events = traces[tid]
-            graphs = _build_graphs_for_trace(trace_events, app_name=app_name)
-            query_traces[str(i)] = {
-                "trace_id": tid,
-                "graphs": graphs
-            }
-        
-        queries[qid] = {
-            "query_id": qid,
-            "traces": query_traces
+        graphs = _build_graphs_for_trace(graph_events)
+        iterations[str(iter_idx)] = {
+            "trace_id": trace_id,
+            "billing_metrics": {"states": billing_events},
+            "graphs": graphs
         }
 
     result = {
@@ -143,51 +135,22 @@ def _build_metrics(events, session_id, app_name=None, memory_config=None, worklo
     if s3_enabled is not None:
         result["s3_enabled"] = s3_enabled
     
-    result["queries"] = queries
+    result["traces"] = iterations
     return result
 
 
-def _build_graphs_for_trace(trace_events, app_name=None):
+def _build_graphs_for_trace(events):
     """Build node blocks and graph segments for a single trace (iteration)."""
 
-    # Separate events by type
-    graph_metrics_events = [e for e in trace_events if e.get("event_type") == "psutil_metrics_graph"]
-    node_metrics_events = [e for e in trace_events if e.get("event_type") == "psutil_metrics_node"]
-    op_events = [e for e in trace_events if e.get("event_type") not in ["psutil_metrics_node", "psutil_metrics_graph"]]
-
-    # Extract graph_name - ALWAYS prioritize app_name/graph_name from events
-    graph_name = "unknown_graph"
-    if graph_metrics_events:
-        graph_name = graph_metrics_events[0].get("graph_name")
-    if not graph_name or graph_name == "unknown_graph":
-        # Fallback to any node's app_name if available
-        for ev in trace_events:
-            if ev.get("app_name"):
-                graph_name = ev.get("app_name")
-                break
-    if not graph_name or graph_name == "unknown_graph":
-        graph_name = app_name or "unknown_graph"
-
-    # Map node metrics by node_name in sequence
-    node_metrics_map = {}
-    for me in node_metrics_events:
-        name = me.get("node_name")
-        if name not in node_metrics_map:
-            node_metrics_map[name] = []
-        node_metrics_map[name].append(me)
-
-    # Track usage counts to match sequential calls to same node
-    node_usage_counts = {}
-
-    # Phase 1: Group consecutive operational events by node_name
+    # Phase 1: Group consecutive events by node_name
     blocks = []
     current_node = None
     current_events = []
     
-    for ev in op_events:
+    for ev in events:
         node_name = ev.get("node_name", "unknown")
         if node_name == "unknown":
-            continue
+            raise ValueError(f"Missing mandatory 'node_name' in event: {ev}")
         
         if node_name != current_node:
             if current_events:
@@ -206,17 +169,6 @@ def _build_graphs_for_trace(trace_events, app_name=None):
         step = i + 1
         node_name = block["node_name"]
         is_tools = (node_name == "tools")
-        
-        # Get metrics for this node instance
-        count = node_usage_counts.get(node_name, 0)
-        metrics = {}
-        if node_name in node_metrics_map and count < len(node_metrics_map[node_name]):
-            m_ev = node_metrics_map[node_name][count]
-            metrics = {
-                "node_e2e_s": m_ev.get("node_e2e_s", 0),
-                "peak_RAM_GB": m_ev.get("peak_RAM_GB", 0)
-            }
-            node_usage_counts[node_name] = count + 1
 
         llm_list = []
         mcp_dict = {}
@@ -250,35 +202,10 @@ def _build_graphs_for_trace(trace_events, app_name=None):
             "node_name": node_name,
             "langgraph_step": step,
             "llm": llm_list,
-            "mcp_tools": mcp_dict,
-            "psutil_metrics": metrics
+            "mcp_tools": mcp_dict
         })
 
-    # Prepare psutil_metrics_graph for insertion
-    graph_metrics = {}
-    if graph_metrics_events:
-        g_ev = graph_metrics_events[0]
-        graph_metrics = {
-            "graph_name": g_ev.get("graph_name"),
-            "session_id": g_ev.get("session_id"),
-            "trace_id": g_ev.get("trace_id"),
-            "state_id": g_ev.get("state_id"),
-            "peak_RAM_GB": g_ev.get("peak_RAM_GB"),
-            "step_count": g_ev.get("step_count"),
-            "graph_e2e_s": g_ev.get("graph_e2e_s")
-        }
-
     # Phase 3: Group nodes into logical graph segments
-    # For monolith, we typically want a single graph.
-    # We can detect this if there's only one unique graph_name in the events or if app_name is provided.
-    if graph_name and graph_name != "unknown_graph":
-        return [{
-            "graph_id": 0,
-            "graph_name": graph_name,
-            "psutil_metrics": graph_metrics,
-            "nodes": formatted_nodes
-        }]
-
     _GRAPH_ROLES = {
         "planner": "planner",
         "actor": "actor",
@@ -298,7 +225,6 @@ def _build_graphs_for_trace(trace_events, app_name=None):
                 graphs.append({
                     "graph_id": graph_counter,
                     "graph_name": current_graph_name,
-                    "psutil_metrics": graph_metrics if current_graph_name == "planner" else {},
                     "nodes": current_graph_nodes
                 })
                 graph_counter += 1
@@ -311,7 +237,6 @@ def _build_graphs_for_trace(trace_events, app_name=None):
         graphs.append({
             "graph_id": graph_counter,
             "graph_name": current_graph_name,
-            "psutil_metrics": graph_metrics if current_graph_name == "planner" else {},
             "nodes": current_graph_nodes
         })
 
@@ -325,7 +250,7 @@ def parse_local_log_file(filepath, session_id, eval_data_map=None, app_name=None
             for line in f:
                 try:
                     doc = json.loads(line.strip())
-                    if doc.get("session_id") == session_id and doc.get("event_type") in ["llm_call", "mcp_tool_execution", "psutil_metrics_node", "psutil_metrics_graph"]:
+                    if doc.get("session_id") == session_id and doc.get("event_type") in ["llm_call", "mcp_tool_execution", "billing_metrics"]:
                         events.append(doc)
                 except json.JSONDecodeError:
                     continue
@@ -403,7 +328,6 @@ if __name__ == "__main__":
     parser.add_argument("--hours-back", type=int, default=1)
     parser.add_argument("--local-log-file", type=str)
     parser.add_argument("--output-file", type=str)
-    parser.add_argument("--s3-enabled", type=str, choices=["true", "false"])
     
     args = parser.parse_args()
     

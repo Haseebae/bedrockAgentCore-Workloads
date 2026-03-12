@@ -1,0 +1,28 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/28.2.8 Chrome/140.0.7339.240 Electron/38.4.0 Safari/537.36" version="28.2.8">
+  <diagram name="Page-1" id="phWLSpfwwT0jQCmaBmI5">
+    <mxGraphModel dx="983" dy="629" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="2VSs0Bx2RyCq4X5NqedA-8" value="" style="rounded=1;whiteSpace=wrap;html=1;strokeColor=none;fillColor=light-dark(#99aad9, #198cc4);fontColor=#ffffff;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="290" y="380" width="170" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="2VSs0Bx2RyCq4X5NqedA-6" value="" style="rounded=1;whiteSpace=wrap;html=1;strokeColor=none;fillColor=light-dark(#4171ca, #198cc4);fontColor=#ffffff;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="310" y="400" width="150" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="2VSs0Bx2RyCq4X5NqedA-9" value="&lt;p&gt;&lt;font face=&quot;Calibri&quot; style=&quot;color: rgb(255, 255, 255);&quot;&gt;AgentCore Runtime&lt;/font&gt;&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="295" y="377" width="130" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="2VSs0Bx2RyCq4X5NqedA-10" value="&lt;p&gt;&lt;font face=&quot;Calibri&quot; style=&quot;color: rgb(255, 255, 255);&quot;&gt;&lt;b style=&quot;&quot;&gt;Planner Agent&lt;/b&gt;&lt;/font&gt;&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="316" y="396" width="130" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="2VSs0Bx2RyCq4X5NqedA-12" value="" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FFFFFF;fillColor=light-dark(#5b9bd5, #ededed);" parent="1" vertex="1">
+          <mxGeometry x="332" y="427" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="2VSs0Bx2RyCq4X5NqedA-13" value="&lt;p&gt;&lt;font face=&quot;Calibri&quot; style=&quot;color: rgb(255, 255, 255);&quot;&gt;Agent Logic&lt;/font&gt;&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="343" y="421" width="130" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

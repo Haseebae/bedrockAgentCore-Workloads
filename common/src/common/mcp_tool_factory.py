@@ -39,6 +39,7 @@ def _make_tool_func(
     session_id_var: contextvars.ContextVar,
     metric_logger: logging.Logger,
     trace_id_var: contextvars.ContextVar = None,
+    query_id_var: contextvars.ContextVar = None,
     state_id_var: contextvars.ContextVar = None
 ):
     def tool_func(**kwargs) -> str:
@@ -46,6 +47,7 @@ def _make_tool_func(
         start_time = time.time()
         session_id = session_id_var.get()
         trace_id = trace_id_var.get() if trace_id_var else "unknown_trace"
+        query_id = query_id_var.get() if query_id_var else "unknown_query"
         state_id = state_id_var.get() if state_id_var else "unknown_state"
 
         try:
@@ -102,6 +104,7 @@ def _make_tool_func(
                 "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
                 "event_type": "mcp_tool_execution",
                 "session_id": session_id,
+                "query_id": query_id,
                 "trace_id": trace_id,
                 "state_id": state_id,
                 "node_name": "tools",
@@ -124,6 +127,7 @@ def _make_tool_func(
                 "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
                 "event_type": "mcp_tool_execution",
                 "session_id": session_id,
+                "query_id": query_id,
                 "trace_id": trace_id,
                 "state_id": state_id,
                 "node_name": "tools",
@@ -144,6 +148,7 @@ def mcp_tools_from_server(
     session_id_var: contextvars.ContextVar,
     metric_logger: logging.Logger,
     trace_id_var: contextvars.ContextVar = None,
+    query_id_var: contextvars.ContextVar = None,
     state_id_var: contextvars.ContextVar = None
 ) -> list[StructuredTool]:
     tool_defs = mcp_client.list_tools()
@@ -158,6 +163,7 @@ def mcp_tools_from_server(
                 session_id_var=session_id_var,
                 metric_logger=metric_logger,
                 trace_id_var=trace_id_var,
+                query_id_var=query_id_var,
                 state_id_var=state_id_var
             ),
             name=td["name"],
@@ -173,6 +179,7 @@ def mcp_tools_from_multiple_servers(
     session_id_var: contextvars.ContextVar,
     metric_logger: logging.Logger,
     trace_id_var: contextvars.ContextVar = None,
+    query_id_var: contextvars.ContextVar = None,
     state_id_var: contextvars.ContextVar = None
 ) -> list[StructuredTool]:
     """Discover tools from multiple MCP servers and return a merged list."""
@@ -182,7 +189,7 @@ def mcp_tools_from_multiple_servers(
             continue
         try:
             client = MCPClient(url, client_name="mcp-tool-factory")
-            tools = mcp_tools_from_server(client, session_id_var, metric_logger, trace_id_var, state_id_var)
+            tools = mcp_tools_from_server(client, session_id_var, metric_logger, trace_id_var, query_id_var, state_id_var)
             all_tools.extend(tools)
         except Exception as e:
             metric_logger.warning(json.dumps({

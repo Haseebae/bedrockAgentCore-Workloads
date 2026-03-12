@@ -12,8 +12,7 @@ if config_path.exists():
 
 BASE_LOG_DIR = os.getenv("BASE_LOG_DIR", "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs")
 VENV_PYTHON = os.getenv("VENV_PATH", "/Users/haseeb/Code/iisc/bedrockAC/.venv/bin/python")
-# PLOTTER_LOG_EXT = os.getenv("PLOTTER_LOG_EXT", "_aggregated_logs/2026-03-10/14-44-36")
-PLOTTER_LOG_EXT = "_aggregated_logs/2026-03-12/17-15-06"
+PLOTTER_LOG_EXT = os.getenv("PLOTTER_LOG_EXT", "_aggregated_logs/2026-03-10/14-44-36")
 PLOTTER_PLOTS_EXT = os.getenv("PLOTTER_PLOTS_EXT", "_plots")
 
 LOGS_DIR = os.path.join(BASE_LOG_DIR, PLOTTER_LOG_EXT)

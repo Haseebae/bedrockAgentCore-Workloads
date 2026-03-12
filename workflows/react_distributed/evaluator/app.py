@@ -38,6 +38,7 @@ current_node_var = contextvars.ContextVar("current_node", default="evaluator")
 trace_id_var = contextvars.ContextVar("trace_id", default="unknown_trace")
 state_id_var = contextvars.ContextVar("state_id", default="unknown_state")
 local_state_id_var = contextvars.ContextVar("local_state_id", default="unknown_local_state")
+local_trace_id_var = contextvars.ContextVar("local_trace_id", default="unknown_local_trace")
 
 # ==================== STRUCTURED OUTPUT ====================
 
@@ -81,6 +82,7 @@ def build_agent():
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
             "local_state_id": local_state_id_var.get(),
+            "local_trace_id": local_trace_id_var.get(),
             "message_len": len(messages),
             "request": "",
             "response": str(eval_result.model_dump())[:1000]
@@ -135,6 +137,7 @@ def handle(payload):
     trace_id = payload.get("trace_id", uuid.uuid4().hex)
     orchestrator_state_id = payload.get("orchestrator_state_id", uuid.uuid4().hex)
     local_state_id = uuid.uuid4().hex
+    local_trace_id = payload.get("local_trace_id", uuid.uuid4().hex)
     memory_config = payload.get("memory_config", "empty")
     thread_id = payload.get("thread_id", trace_id)
     actor_id = payload.get("actor_id", "default_actor_id")
@@ -144,6 +147,7 @@ def handle(payload):
     trace_id_var.set(trace_id)
     state_id_var.set(orchestrator_state_id)
     local_state_id_var.set(local_state_id)
+    local_trace_id_var.set(local_trace_id)
     current_node_var.set("evaluator")
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -204,6 +208,7 @@ def handle(payload):
         "trace_id": trace_id,
         "state_id": orchestrator_state_id,
         "local_state_id": local_state_id,
+        "local_trace_id": local_trace_id,
         "peak_memory_gb": round(peak_memory_gb, 4),
         "step_count": result.get("step_count", 0),
         "wall_clock_s": round(wall_clock_time, 4)

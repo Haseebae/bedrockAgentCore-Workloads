@@ -11,14 +11,14 @@ RUNTIME_ARN="${RUNTIME_ARN:-arn:aws:bedrock-agentcore:us-east-1:123456789012:run
 RUNNER_PATH="${RUNNER_PATH:-/Users/haseeb/Code/iisc/bedrockAC/benchmark/runner.py}"
 
 # Default number of reruns
-RERUNS=1 #Manually select 3
+RERUNS=2 #Manually select 3
 
 # Default workloads
 WORKLOADS_STR="arxiv"
 
 # Default combinations of (memory_config, mcp_cache)
 CONFIGS=(
-    # "empty false false" # E
+    "empty false false" # E
     "naive false false" # N
     "naive true true" # C
     "full_trace true false" # M

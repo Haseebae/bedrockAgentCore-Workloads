@@ -17,7 +17,7 @@ import os
 from arxiv_workloads import get_arxiv_workload
 from log_workloads import get_log_workload
 from logger import parse_local_log_file, query_cloudwatch_structured_logs, query_cloudwatch_debug_logs
-from verify_flags import run_all_flags
+from verify_logs import verify_logs
 
 def _read_response_body(response):
     """Extract plain text from a Bedrock AgentCore response dict."""
@@ -59,13 +59,12 @@ def _read_response_body(response):
     return text_result, eval_data
 
 
-def run_single_query(agent_runtime_arn, query, session_id, app_name, memory_config_flag, workload_type, s3_enabled, iteration_count=0):
+def run_single_query(agent_runtime_arn, query, session_id, memory_config_flag, workload_type, s3_enabled, iteration_count=0):
     config = Config(read_timeout=900)
     client = boto3.client('bedrock-agentcore', config=config)
     
     start_time = time.time()
     
-    query_id = uuid.uuid4().hex
     trace_id = uuid.uuid4().hex
     span_id = uuid.uuid4().hex[:16]
     traceparent = f"00-{trace_id}-{span_id}-01"
@@ -84,13 +83,12 @@ def run_single_query(agent_runtime_arn, query, session_id, app_name, memory_conf
             payload=json.dumps({
                 "prompt": query,
                 "session_id": session_id,
-                "query_id": query_id,
                 "trace_id": trace_id,
                 "iteration_count": iteration_count,
+                # Crucial: Send the flag to the agent so it configures the checkpointer
                 "memory_config": memory_config_flag,
                 "workload_type": workload_type,
-                "s3_enabled": s3_enabled,
-                "app_name": app_name
+                "s3_enabled": s3_enabled
             }).encode()
         )
         print(f"  [DEBUG] Got response, keys: {list(response.keys())}", flush=True)
@@ -105,19 +103,16 @@ def run_single_query(agent_runtime_arn, query, session_id, app_name, memory_conf
         return {
             "query": query,
             "session_id": session_id,
-            "query_id": query_id,
             "trace_id": trace_id,
             "invocation": {
                 "agentRuntimeArn": agent_runtime_arn,
                 "runtimeSessionId": session_id,
-                "query_id": query_id,
-                "trace_id": trace_id,
+                "traceId": trace_id,
                 "traceParent": traceparent,
                 "traceState": f"rojo={span_id}",
                 "payload": {
                     "prompt": query,
                     "session_id": session_id,
-                    "query_id": query_id,
                     "trace_id": trace_id,
                     "iteration_count": iteration_count,
                     "memory_config": memory_config_flag,
@@ -136,19 +131,16 @@ def run_single_query(agent_runtime_arn, query, session_id, app_name, memory_conf
         return {
             "query": query,
             "session_id": session_id,
-            "query_id": query_id,
             "trace_id": trace_id,
             "invocation": {
                 "agentRuntimeArn": agent_runtime_arn,
                 "runtimeSessionId": session_id,
-                "query_id": query_id,
-                "trace_id": trace_id,
+                "traceId": trace_id,
                 "traceParent": traceparent,
                 "traceState": f"rojo={span_id}",
                 "payload": {
                     "prompt": query,
                     "session_id": session_id,
-                    "query_id": query_id,
                     "trace_id": trace_id,
                     "iteration_count": iteration_count,
                     "memory_config": memory_config_flag,
@@ -282,7 +274,6 @@ def start_stress_test(
                 agent_runtime_arn, 
                 final_query, 
                 session_id, 
-                app_name,
                 memory_config_flag=agent_memory_flag,
                 workload_type=workload_type,
                 s3_enabled=s3_enabled
@@ -359,7 +350,7 @@ def start_stress_test(
         debug_events = query_cloudwatch_debug_logs(region, start, end, session_id)
         
         # Verify if a client-side retry pattern happened
-        verification_results = run_all_flags(debug_events) if debug_events else {"global_metrics": {}, "traces": {}}
+        verification_results = verify_logs(debug_events) if debug_events else {"global_metrics": {}, "traces": {}}
         global_metrics = verification_results.get("global_metrics", {})
             
         # base dir from env or default
@@ -375,7 +366,6 @@ def start_stress_test(
         with open(flag_file, "w") as f:
             f.write(f"TRACE_STATE_COUNT_MISMATCH_PASS={global_metrics.get('all_trace_state_count_mismatch_pass', False)}\n")
             f.write(f"ALL_WORKFLOW_PROPER_PASS={global_metrics.get('all_workflow_proper_pass', False)}\n")
-            f.write(f"ALL_LOCAL_TRACE_COUNT_PASS={global_metrics.get('all_local_trace_count_pass', False)}\n")
         
         # 1. metrics.json
         out_file = session_dir / "metrics.json"
@@ -443,23 +433,17 @@ def start_stress_test(
             
         llm_calls = 0
         mcp_tools = 0
-        psutil_graphs = 0
-        psutil_nodes = 0
         
         for iteration in metrics.get("traces", {}).values():
             for graph in iteration.get("graphs", []):
-                if graph.get("psutil_metrics"):
-                    psutil_graphs += 1
                 for node in graph.get("nodes", []):
                     llm_calls += len(node.get("llm", []))
                     mcp_tools += len(node.get("mcp_tools", {}))
-                    if node.get("psutil_metrics"):
-                        psutil_nodes += 1
         
         if llm_calls > 0:
-            print(f"Validation Passed: Found {llm_calls} LLM generation requests")
-            if psutil_graphs > 0 or psutil_nodes > 0:
-                print(f"Validation Passed: Found {psutil_graphs} graph-level and {psutil_nodes} node-level psutil metrics")
+            print(f"Validation Passed: Found {llm_calls} LLM generation requests across iterations")
+            if mcp_tools > 0:
+                print(f"Validation Passed: Found {mcp_tools} unique MCP tools used across iterations")
         else:
             print(f"Validation Failed: Expected LLM metrics but found none")
             print(f"Raw metrics dumped:\n{json.dumps(metrics, indent=2)}")

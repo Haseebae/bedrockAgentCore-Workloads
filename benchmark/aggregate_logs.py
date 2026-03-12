@@ -1,53 +1,438 @@
+"""
+Unified Metrics Aggregator for Monolith & Distributed Agentic Workflows
+========================================================================
+
+Handles both topologies identically:
+  - Monolith:     1 graph per query, N nodes per graph
+  - Distributed:  N graphs per query, fewer nodes per graph
+
+Aggregation levels:
+  L1: Nodes → NodeType   (SUM within graph, keyed by node_name)
+  L2: Graphs → Query     (SUM costs/latency, MAX RAM, merge NodeTypes)
+  L3: Queries → Batch    (AVERAGE across reruns, matched by query position)
+"""
+
 import os
 import json
-import pandas as pd
 import argparse
+from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
+from typing import Dict, List, Any, Optional
 
-base_log_dir = os.getenv("BASE_LOG_DIR", "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs")
-log_ext = os.getenv("AGG_LOG_EXT", "2026-03-10")
-base_dir = os.path.join(base_log_dir, log_ext)
-dirs = []
-for dir in os.listdir(base_dir):
-    if dir != "_archive":
-        dirs.append(os.path.join(base_dir, dir))
 
-print(len(dirs))
-log_ext = "2026-03-11"
-base_dir = os.path.join(base_log_dir, log_ext)
-for dir in os.listdir(base_dir):
-    if dir != "_archive":
-        dirs.append(os.path.join(base_dir, dir))
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1. PRICING
+# ═══════════════════════════════════════════════════════════════════════════════
 
-ARXIV_LOG_DIRS = [
+def llm_cost_cents(input_tokens: int, output_tokens: int, cached_tokens: int) -> float:
+    """gpt-4o-mini pricing → cents."""
+    input_c  = (input_tokens  / 1_000_000) * 0.15
+    cached_c = (cached_tokens / 1_000_000) * 0.075
+    output_c = (output_tokens / 1_000_000) * 0.60
+    return (input_c + cached_c + output_c) * 100
+
+
+def mcp_cost_cents(num_calls: int, total_time_s: float) -> float:
+    """Lambda execution pricing → cents."""
+    invocation = num_calls * 0.000025
+    duration   = 0.5 * total_time_s * 0.0000166
+    return (invocation + duration) * 100
+
+
+def graph_runtime_cost_cents(e2e_s: float, peak_ram_gb: float) -> dict:
+    """AgentCore runtime pricing for ONE graph invocation → cents."""
+    vcpu = (e2e_s * 0.0895 / 3600) * 100
+    gb   = (e2e_s * peak_ram_gb * 0.00945 / 3600) * 100
+    return {"vcpu_cents": vcpu, "gb_cents": gb, "total_cents": vcpu + gb}
+
+
+def graph_memory_cost_cents(step_count: int) -> float:
+    """Checkpointer event pricing for ONE graph invocation → cents.
+    Each invocation contributes 1 read + step_count writes."""
+    total_events = 1 + step_count
+    return (total_events * 0.25 / 1000) * 100
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 2. PARSING — Metrics File → Normalized Structures
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Keys that are summed when merging nodes of the same type
+_SUMMABLE_NODE_KEYS = [
+    "node_e2e_s", "input_tokens", "output_tokens", "cached_tokens",
+    "llm_call_count", "llm_wall_clock_s", "llm_network_latency_ms",
+    "mcp_call_count", "mcp_wall_clock_s", "mcp_execution_time_ms",
 ]
 
-LOG_LOG_DIRS = [
-]
+
+def _merge_node_into(target: dict, source: dict):
+    """Merge source node metrics into target: SUM numerics, MAX RAM."""
+    for k in _SUMMABLE_NODE_KEYS:
+        target[k] = target.get(k, 0) + source.get(k, 0)
+    target["peak_RAM_GB"] = max(target.get("peak_RAM_GB", 0),
+                                source.get("peak_RAM_GB", 0))
 
 
+def parse_node(node_data: dict) -> dict:
+    """Parse a single node entry into a flat dict of metrics."""
+    ps = node_data.get("psutil_metrics", {})
+    n = {
+        "node_name":              node_data.get("node_name", "unknown"),
+        "langgraph_step":         node_data.get("langgraph_step", 0),
+        "node_e2e_s":             ps.get("node_e2e_s", 0.0),
+        "peak_RAM_GB":            ps.get("peak_RAM_GB", 0.0),
+        "input_tokens":           0,
+        "output_tokens":          0,
+        "cached_tokens":          0,
+        "llm_call_count":         0,
+        "llm_wall_clock_s":       0.0,
+        "llm_network_latency_ms": 0.0,
+        "mcp_call_count":         0,
+        "mcp_wall_clock_s":       0.0,
+        "mcp_execution_time_ms":  0.0,
+    }
+    for llm in node_data.get("llm", []):
+        n["llm_call_count"]         += 1
+        n["input_tokens"]           += llm.get("input_tokens", 0)
+        n["output_tokens"]          += llm.get("output_tokens", 0)
+        n["cached_tokens"]          += llm.get("cached_tokens", 0)
+        n["llm_wall_clock_s"]       += llm.get("wall_clock_s", 0.0)
+        n["llm_network_latency_ms"] += llm.get("network_latency_ms", 0.0)
 
-BASE_LOG_DIRS = dirs+ ARXIV_LOG_DIRS + LOG_LOG_DIRS
-print(f"Total number of log directories: {len(BASE_LOG_DIRS)} \n from arxiv: {len(ARXIV_LOG_DIRS)} and logs: {len(LOG_LOG_DIRS)}")
+    for _key, tool in node_data.get("mcp_tools", {}).items():
+        n["mcp_call_count"]        += 1
+        n["mcp_wall_clock_s"]      += tool.get("wall_clock_s", 0.0)
+        n["mcp_execution_time_ms"] += tool.get("metrics", {}).get("execution_time_ms", 0.0)
+    return n
 
 
-current_time = datetime.now()
-date_str = current_time.strftime("%Y-%m-%d")
-time_str = current_time.strftime("%H-%M-%S")
-out_ext = os.getenv("AGG_OUT_EXT", "_aggregated_logs")
-OUTPUT_DIR = os.path.join(base_log_dir, out_ext, date_str, time_str)
+def parse_graph(graph_data: dict, state_id: str) -> dict:
+    """Parse a graph → dict with graph-level psutil and nodes_by_type.
+    L1 aggregation (same-named nodes merged) happens here."""
+    ps = graph_data.get("psutil_metrics", {})
 
-def manually_create_workloads():
-    """
-    Auto-discovers the workload batches based on the folder names across the given log directories.
-    A single batch contains paths that share the same processed batch and memory config.
-    Returns: dict mapping 'workload-batch-memconfig' to a list of run paths.
-    
-    You can also manually edit the returned dictionary if you prefer to hardcode them.
-    """
-    batches = defaultdict(list)
-    for log_dir in BASE_LOG_DIRS:
+    nodes_by_type: Dict[str, dict] = {}
+    for nd in graph_data.get("nodes", []):
+        parsed = parse_node(nd)
+        name = parsed["node_name"]
+        if name in nodes_by_type:
+            _merge_node_into(nodes_by_type[name], parsed)
+        else:
+            nodes_by_type[name] = parsed
+
+    g = {
+        "graph_id":      graph_data.get("graph_id", 0),
+        "graph_name":    graph_data.get("graph_name", "unknown"),
+        "state_id":      state_id,
+        "graph_e2e_s":   ps.get("graph_e2e_s", 0.0),
+        "peak_RAM_GB":   ps.get("peak_RAM_GB", 0.0),
+        "step_count":    ps.get("step_count", 0),
+        "nodes_by_type": nodes_by_type,
+    }
+    # Per-graph cost (each graph = 1 runtime invocation)
+    rt = graph_runtime_cost_cents(g["graph_e2e_s"], g["peak_RAM_GB"])
+    g["runtime_cost"] = rt
+    g["memory_cost_cents"] = graph_memory_cost_cents(g["step_count"])
+    return g
+
+
+def parse_query(query_id: str, query_data: dict, position: int) -> dict:
+    """Parse a query, select final trace iteration, run L2 aggregation.
+    Returns a fully-costed QuerySummary dict."""
+    traces = query_data.get("traces", {})
+    if not traces:
+        return _empty_query(query_id, position)
+
+    # Take the last (highest-numbered) iteration
+    final_key = max(traces.keys(), key=lambda k: int(k))
+    trace = traces[final_key]
+    state_id = trace.get("state_id", "")
+
+    # --- Parse graphs ---
+    graphs = [parse_graph(gd, state_id)
+              for gd in trace.get("graphs", [])]
+
+    # --- L2: aggregate graphs → query ---
+    total_e2e      = sum(g["graph_e2e_s"]  for g in graphs)
+    peak_ram       = max((g["peak_RAM_GB"] for g in graphs), default=0.0)
+    total_steps    = sum(g["step_count"]   for g in graphs)
+    num_invocations = len(graphs)
+
+    # Merge nodes_by_type across all graphs
+    merged_nodes: Dict[str, dict] = {}
+    for g in graphs:
+        for name, ns in g["nodes_by_type"].items():
+            if name in merged_nodes:
+                _merge_node_into(merged_nodes[name], ns)
+            else:
+                merged_nodes[name] = deepcopy(ns)
+
+    # --- Costs ---
+    tot_in     = sum(n["input_tokens"]  for n in merged_nodes.values())
+    tot_out    = sum(n["output_tokens"] for n in merged_nodes.values())
+    tot_cached = sum(n["cached_tokens"] for n in merged_nodes.values())
+    llm_c = llm_cost_cents(tot_in, tot_out, tot_cached)
+
+    tot_mcp_calls = sum(n["mcp_call_count"]  for n in merged_nodes.values())
+    tot_mcp_time  = sum(n["mcp_wall_clock_s"] for n in merged_nodes.values())
+    mcp_c = mcp_cost_cents(tot_mcp_calls, tot_mcp_time)
+
+    # Runtime & memory: SUM of per-graph costs (handles both topologies)
+    runtime_c = sum(g["runtime_cost"]["total_cents"] for g in graphs)
+    memory_c  = sum(g["memory_cost_cents"]           for g in graphs)
+
+    return {
+        "query_id":               query_id,
+        "query_position":         position,
+        "success":                trace.get("success", False),
+        "iteration_count":        trace.get("iteration_count", int(final_key)),
+        "trace_id":               trace.get("trace_id", ""),
+        "state_id":               state_id,
+        "num_graph_invocations":  num_invocations,
+        "total_e2e_s":            total_e2e,
+        "total_peak_RAM_GB":      peak_ram,
+        "total_step_count":       total_steps,
+        "nodes_by_type":          merged_nodes,
+        "graphs":                 graphs,
+        "cost": {
+            "llm_cents":     llm_c,
+            "mcp_cents":     mcp_c,
+            "runtime_cents": runtime_c,
+            "memory_cents":  memory_c,
+            "total_cents":   llm_c + mcp_c + runtime_c + memory_c,
+        },
+    }
+
+
+def _empty_query(query_id, position):
+    return {
+        "query_id": query_id, "query_position": position,
+        "success": False, "iteration_count": 0,
+        "trace_id": "", "state_id": "",
+        "num_graph_invocations": 0,
+        "total_e2e_s": 0, "total_peak_RAM_GB": 0, "total_step_count": 0,
+        "nodes_by_type": {}, "graphs": [],
+        "cost": {k: 0.0 for k in
+                 ["llm_cents","mcp_cents","runtime_cents","memory_cents","total_cents"]},
+    }
+
+
+def parse_metrics_file(file_path: str) -> dict:
+    """Top-level parser: file → RunSummary dict."""
+    with open(file_path, "r") as f:
+        data = json.load(f)
+
+    queries = []
+    for pos, (qid, qdata) in enumerate(data.get("queries", {}).items(), 1):
+        queries.append(parse_query(qid, qdata, pos))
+
+    # Detect cache from actual tool-call hits
+    cache_detected = any(
+        tool.get("metrics", {}).get("cache_hit") is True
+        for qd in data.get("queries", {}).values()
+        for td in qd.get("traces", {}).values()
+        for g  in td.get("graphs", [])
+        for n  in g.get("nodes", [])
+        for tool in n.get("mcp_tools", {}).values()
+    )
+
+    return {
+        "file_path":      file_path,
+        "session_id":     data.get("session_id", "unknown"),
+        "app_name":       data.get("app_name", "unknown"),
+        "memory_config":  data.get("memory_config", "unknown"),
+        "workload_type":  data.get("workload_type", "unknown"),
+        "s3_enabled":     data.get("s3_enabled", False),
+        "cache_detected": cache_detected,
+        "queries":        queries,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. CROSS-RUN AGGREGATION  (L3)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _avg(vals):
+    return sum(vals) / len(vals) if vals else 0.0
+
+
+def average_queries_across_runs(summaries: List[dict]) -> dict:
+    """Given N QuerySummary dicts for the same query position, return averages."""
+    n = len(summaries)
+    if n == 0:
+        return {}
+
+    result = {
+        "query_position":        summaries[0]["query_position"],
+        "num_runs":              n,
+        "success_rate":          sum(s["success"] for s in summaries) / n,
+        "avg_iteration_count":   _avg([s["iteration_count"] for s in summaries]),
+        "avg_total_e2e_s":       _avg([s["total_e2e_s"]     for s in summaries]),
+        "max_peak_RAM_GB":       max(s["total_peak_RAM_GB"] for s in summaries),
+        "avg_total_step_count":  _avg([s["total_step_count"] for s in summaries]),
+        "avg_num_invocations":   _avg([s["num_graph_invocations"] for s in summaries]),
+    }
+
+    # ── Average costs ──
+    cost_keys = ["llm_cents", "mcp_cents", "runtime_cents", "memory_cents", "total_cents"]
+    result["avg_cost"] = {k: _avg([s["cost"][k] for s in summaries]) for k in cost_keys}
+
+    # ── Per-node-type averages ──
+    all_names = sorted({nm for s in summaries for nm in s["nodes_by_type"]})
+    result["nodes"] = {}
+    for name in all_names:
+        matching = [s["nodes_by_type"][name]
+                    for s in summaries if name in s["nodes_by_type"]]
+        if not matching:
+            continue
+        node_avg = {"node_name": name}
+        for k in _SUMMABLE_NODE_KEYS:
+            node_avg[f"avg_{k}"] = _avg([m.get(k, 0) for m in matching])
+        node_avg["max_peak_RAM_GB"] = max(m.get("peak_RAM_GB", 0) for m in matching)
+        result["nodes"][name] = node_avg
+
+    # ── Per-run audit trail ──
+    result["run_details"] = [
+        {
+            "query_id":       s["query_id"],
+            "trace_id":       s["trace_id"],
+            "state_id":       s["state_id"],
+            "success":        s["success"],
+            "total_e2e_s":    s["total_e2e_s"],
+            "total_cost_cents": s["cost"]["total_cents"],
+            "num_graphs":     s["num_graph_invocations"],
+        }
+        for s in summaries
+    ]
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4. CONFIG IDENTIFICATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def determine_config_id(memory_config: str, s3_enabled: bool,
+                        cache_detected: bool) -> str:
+    m = memory_config.lower()
+    if   m in ("empty", "e")      and not s3_enabled and not cache_detected: return "E"
+    elif m in ("naive", "n")      and not s3_enabled and not cache_detected: return "N"
+    elif m in ("naive", "n")      and     s3_enabled and     cache_detected: return "C"
+    elif m in ("full_trace", "m") and     s3_enabled and not cache_detected: return "M"
+    elif m in ("full_trace","mc") and     s3_enabled and     cache_detected: return "MC"
+    return "unknown"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5. BATCH AGGREGATION (orchestration)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def aggregate_batch(batch_name: str, run_paths: List[str],
+                    output_dir: str, if_checkpointer: bool = False):
+    """Full pipeline for one batch: parse → adjust → average → write."""
+
+    # ── Parse all runs ──
+    runs = []
+    for rp in run_paths:
+        mp = os.path.join(rp, "metrics.json")
+        if not os.path.exists(mp):
+            print(f"  ⚠ missing {mp}")
+            continue
+        try:
+            runs.append(parse_metrics_file(mp))
+        except Exception as e:
+            print(f"  ✗ error parsing {mp}: {e}")
+    if not runs:
+        print(f"  ✗ no valid runs for {batch_name}")
+        return
+
+    # ── Zero out memory costs for non-checkpointer configs ──
+    if not if_checkpointer:
+        for run in runs:
+            if run["memory_config"].lower() in ("empty", "e", "naive", "n"):
+                for q in run["queries"]:
+                    q["cost"]["memory_cents"] = 0.0
+                    q["cost"]["total_cents"] = (
+                        q["cost"]["llm_cents"]
+                        + q["cost"]["mcp_cents"]
+                        + q["cost"]["runtime_cents"]
+                    )
+
+    # ── Group queries by position across runs, then average ──
+    by_position: Dict[int, List[dict]] = defaultdict(list)
+    for run in runs:
+        for q in run["queries"]:
+            by_position[q["query_position"]].append(q)
+
+    config_id = determine_config_id(
+        runs[0]["memory_config"], runs[0]["s3_enabled"], runs[0]["cache_detected"])
+
+    output = {
+        "batch_name": batch_name,
+        "metadata": {
+            "app_name":       runs[0]["app_name"],
+            "memory_config":  runs[0]["memory_config"],
+            "workload_type":  runs[0]["workload_type"],
+            "s3_enabled":     runs[0]["s3_enabled"],
+            "cache_detected": runs[0]["cache_detected"],
+            "config_id":      config_id,
+            "num_runs":       len(runs),
+            "session_ids":    [r["session_id"]  for r in runs],
+            "file_paths":     [r["file_path"]   for r in runs],
+        },
+        "queries": {},
+    }
+
+    for pos in sorted(by_position):
+        output["queries"][str(pos)] = average_queries_across_runs(by_position[pos])
+
+    # ── Write ──
+    os.makedirs(output_dir, exist_ok=True)
+    out_json = os.path.join(output_dir, f"{batch_name}.json")
+    with open(out_json, "w") as f:
+        json.dump(output, f, indent=2)
+
+    # Human-readable log
+    out_log = os.path.join(output_dir, f"{batch_name}.log")
+    with open(out_log, "w") as f:
+        f.write(f"Batch: {batch_name}   Config: {config_id}   Runs: {len(runs)}\n")
+        f.write("=" * 70 + "\n\n")
+        for pos_str, qavg in output["queries"].items():
+            f.write(f"── Query position {pos_str}  "
+                    f"(success rate: {qavg['success_rate']:.0%}, "
+                    f"runs: {qavg['num_runs']}) ──\n")
+            f.write(f"  avg e2e:        {qavg['avg_total_e2e_s']:.3f}s\n")
+            f.write(f"  peak RAM:       {qavg['max_peak_RAM_GB']:.4f} GB\n")
+            f.write(f"  avg steps:      {qavg['avg_total_step_count']:.1f}\n")
+            f.write(f"  avg invocations: {qavg['avg_num_invocations']:.1f}\n")
+            c = qavg["avg_cost"]
+            f.write(f"  cost breakdown (avg cents):\n")
+            f.write(f"    LLM:     {c['llm_cents']:.6f}\n")
+            f.write(f"    MCP:     {c['mcp_cents']:.6f}\n")
+            f.write(f"    Runtime: {c['runtime_cents']:.6f}\n")
+            f.write(f"    Memory:  {c['memory_cents']:.6f}\n")
+            f.write(f"    TOTAL:   {c['total_cents']:.6f}\n")
+            f.write(f"  nodes:\n")
+            for nname, nd in qavg.get("nodes", {}).items():
+                f.write(f"    {nname:12s}  "
+                        f"e2e={nd['avg_node_e2e_s']:.3f}s  "
+                        f"in_tok={nd['avg_input_tokens']:.0f}  "
+                        f"out_tok={nd['avg_output_tokens']:.0f}  "
+                        f"llm_calls={nd['avg_llm_call_count']:.0f}  "
+                        f"mcp_calls={nd['avg_mcp_call_count']:.0f}\n")
+            f.write("\n")
+
+    print(f"  ✓ {batch_name}: {len(runs)} runs → {out_json}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6. BATCH DISCOVERY & MAIN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def discover_batches(base_log_dirs: List[str]) -> Dict[str, List[str]]:
+    """Walk log dirs, group run paths by batch name."""
+    batches: Dict[str, List[str]] = defaultdict(list)
+    for log_dir in base_log_dirs:
         runs_dir = os.path.join(log_dir, "runs")
         if not os.path.isdir(runs_dir):
             continue
@@ -55,294 +440,51 @@ def manually_create_workloads():
             run_path = os.path.join(runs_dir, run_name)
             if os.path.isdir(run_path):
                 batches[run_name].append(run_path)
-    
     return dict(batches)
 
-def extract_metrics_from_data(data, run_path):
-    """
-    Extracts all numerical metrics from LLM calls and tool calls from the raw loaded JSON data.
-    Returns a list of flat dictionaries identifying the node and query number.
-    """
-    records = []
-    traces = data.get("traces", {})
-    for query_key, trace_data in traces.items():
-        # query_key typically is "1", "2", "3" indicating the multi-turn index.
-        try:
-            query_number = int(query_key)
-        except ValueError:
-            query_number = query_key
-            
-        for graph in trace_data.get("graphs", []):
-            for node in graph.get("nodes", []):
-                node_name = node.get("node_name", "unknown")
-                
-                # Extract LLM metrics
-                llm_calls = node.get("llm", [])
-                for llm_call in llm_calls:
-                    record = {
-                        "run_path": run_path,
-                        "query_number": query_number,
-                        "node_name": node_name,
-                        "llm_call_count": 1,
-                    }
-                    for k, v in llm_call.items():
-                        # Extract numerical values (skip booleans or strings like timestamp)
-                        if isinstance(v, (int, float)) and not isinstance(v, bool):
-                            record[f"llm_{k}"] = v
-                    records.append(record)
-                
-                # Extract Tool metrics
-                mcp_tools = node.get("mcp_tools", {})
-                for tool_call in mcp_tools.values():
-                    record = {
-                        "run_path": run_path,
-                        "query_number": query_number,
-                        "node_name": node_name,  # For tool execution this is usually just "tools"
-                        "tool_call_count": 1,
-                    }
-                    metrics = tool_call.get("metrics", {})
-                    for k, v in metrics.items():
-                        if isinstance(v, (int, float)) and not isinstance(v, bool):
-                            record[f"tool_{k}"] = v
-                    records.append(record)
-                    
-    return records
 
-def aggregate_batch(batch_name, run_paths, if_checkpointer=False):
-    """
-    Aggregates metrics for a single batch.
-    - Inside a log file: sums metrics per (query_number, node_name).
-    - Across log files: averages metrics per (query_number, node_name).
-    """
-    parts = batch_name.split("-")
-    memory_val = parts[2].replace("memory_", "") if len(parts) > 2 and parts[2].startswith("memory_") else "unknown"
-
-    all_records = []
-    file_paths = []
-    session_ids = []
-    trace_ids_by_query = defaultdict(list)
-    success_by_query = defaultdict(list)
-    pricing_by_query = defaultdict(list)
-    
-    for run_path in run_paths:
-        metrics_path = os.path.join(run_path, "metrics.json")
-        if not os.path.exists(metrics_path):
-            print(f"File not found: {metrics_path}")
+def collect_log_dirs(base_log_dir: str, date_strings: List[str]) -> List[str]:
+    """Collect all non-archive directories under each date folder."""
+    dirs = []
+    for ds in date_strings:
+        base = os.path.join(base_log_dir, ds)
+        if not os.path.isdir(base):
             continue
-            
-        with open(metrics_path, 'r') as f:
-            data = json.load(f)
-            
-        file_paths.append(metrics_path)
-        
-        session_id = data.get("session_id", "unknown")
-        if session_id not in session_ids:
-            session_ids.append(session_id)
-            
-        # Extract traces tracking info
-        traces = data.get("traces", {})
-        for query_key, trace_data in traces.items():
-            try:
-                query_number = int(query_key)
-            except ValueError:
-                query_number = query_key
-                
-            trace_id = trace_data.get("trace_id")
-            if trace_id and trace_id not in trace_ids_by_query[query_number]:
-                trace_ids_by_query[query_number].append(trace_id)
-                success_by_query[query_number].append(trace_data.get("success", False))
-                
-            # Compute pricing
-            llm_wall_clocks = {}
-            mcp_wall_clocks = {}
-            for graph in trace_data.get("graphs", []):
-                for node in graph.get("nodes", []):
-                    for llm_call in node.get("llm", []):
-                        latency_s = llm_call.get("network_latency_ms", 0) / 1000.0
-                        state_id = llm_call.get("state_id")
-                        if state_id:
-                            llm_wall_clocks[state_id] = llm_wall_clocks.get(state_id, 0) + latency_s
-                            
-                    mcp_tools = node.get("mcp_tools", {})
-                    for tool_call in mcp_tools.values():
-                        latency_s = tool_call.get("wall_clock_s", 0)
-                        state_id = tool_call.get("state_id")
-                        if state_id:
-                            mcp_wall_clocks[state_id] = mcp_wall_clocks.get(state_id, 0) + latency_s
-                            
-            billing_metrics = trace_data.get("billing_metrics", {})
-            states = billing_metrics.get("states", [])
-            
-            total_vcpu_cents = 0.0
-            total_gb_cents = 0.0
-            total_memory_cents = 0.0
-            
-            for state in states:
-                state_id = state.get("state_id")
-                wall_clock = state.get("wall_clock_s", 0)
-                peak_memory = state.get("peak_memory_gb", 0)
-                step_count = state.get("step_count", 0)
-                
-                sum_llm = llm_wall_clocks.get(state_id, 0)
-                sum_mcp = mcp_wall_clocks.get(state_id, 0)
-                
-                active_processing_time = max(0, wall_clock - (sum_llm + sum_mcp))
-                
-                vcpu_cents = (active_processing_time * 0.0895 / 3600) * 100
-                gb_cents = (wall_clock * peak_memory * 0.00945 / 3600) * 100
-                memory_cents = ((1 + step_count) * 0.25 / 1000) * 100
-                
-                if not if_checkpointer and memory_val.lower() in ["e", "n", "empty", "naive"]:
-                    memory_cents = 0.0
-                
-                total_vcpu_cents += vcpu_cents
-                total_gb_cents += gb_cents
-                total_memory_cents += memory_cents
-                
-            pricing_record = {
-                "trace_id": trace_id,
-                "runtime_vcpu-hour_cents": total_vcpu_cents,
-                "runtime_gb-hour_cents": total_gb_cents,
-                "memory_events_cents": total_memory_cents,
-                "total_cents": total_vcpu_cents + total_gb_cents + total_memory_cents,
-                "runtime_details": {
-                    "active_processing_time_s": active_processing_time,
-                    "wall_clock_s": wall_clock,
-                    "peak_memory_gb": peak_memory,
-                    "step_count": step_count,
-                    "sum_llm_s": sum_llm,
-                    "sum_mcp_s": sum_mcp,
-                },
-            }
-            pricing_by_query[query_number].append(pricing_record)
-                
-        records = extract_metrics_from_data(data, run_path)
-        all_records.extend(records)
-        
-    if not all_records:
-        print(f"No valid numerical records found for batch {batch_name}")
-        return
-        
-    df = pd.DataFrame(all_records)
-    # Fill missing metrics with 0 (e.g. if a row is an LLM call it won't have tool_execution_time).
-    df.fillna(0, inplace=True)
-    
-    # 1. Inside a single log file: group by query_number and node_name, and SUM
-    # Include 'run_path' in groupby to ensure summation is within the boundary of a single log file.
-    internal_grouped = df.groupby(["run_path", "query_number", "node_name"]).sum(numeric_only=True).reset_index()
-    
-    # 2. Across log files: group by query_number and node_name, and AVERAGE (mean)
-    # Drop 'run_path' to average across the multiple log files.
-    final_aggregated = internal_grouped.drop(columns=["run_path"]).groupby(["query_number", "node_name"]).mean(numeric_only=True).reset_index()
-    
-    # Sort for readability: chronologically by turn/query, then alphabetically by node
-    final_aggregated = final_aggregated.sort_values(by=["query_number", "node_name"])
-    
-    # Parse log_metadata from batch_name (e.g., arxiv-batch_1-memory_e-cache_false)
-    workload = parts[0] if len(parts) > 0 else "unknown"
-    batch_val = parts[1].replace("batch_", "") if len(parts) > 1 and parts[1].startswith("batch_") else "unknown"
-    # memory_val already extracted above
-    s3_val = parts[3].replace("s3_", "") if len(parts) > 3 and parts[3].startswith("s3_") else "unknown"
-    cache_val = parts[4].replace("cache_", "") if len(parts) > 4 and parts[4].startswith("cache_") else "unknown"
-    
-    # Map to unique config tracking identifiers based on memory and cache 
-    config_id = "unknown"
-    if memory_val in ["e", "empty"] and cache_val == "false" and s3_val == "false": config_id = "E"
-    elif memory_val in ["n", "naive"] and cache_val == "false" and s3_val == "false": config_id = "N"
-    elif memory_val in ["n", "naive"] and cache_val == "true" and s3_val == "true": config_id = "C"
-    elif memory_val in ["m", "full_trace"] and cache_val == "false" and s3_val == "true": config_id = "M"
-    elif memory_val in ["m", "full_trace", "mc"] and cache_val == "true" and s3_val == "true": config_id = "MC"
-    
-    # Construct the final nested format
-    output_data = {
-        "candidate_metadata": {
-            "file_paths": file_paths,
-            "session_ids": session_ids
-        },
-        "log_metadata": {
-            "workload": workload,
-            "batch": batch_val,
-            "memory": memory_val,
-            "cache": cache_val,
-            "config_id": config_id
-        },
-        "traces": {}
-    }
-    
-    # Populate traces
-    for _, row in final_aggregated.iterrows():
-        q_num = row["query_number"]
-        q_str = str(q_num)
-        node_name = row["node_name"]
-        
-        if q_str not in output_data["traces"]:
-            # Only set success to True if ALL collected success instances for this query are True.
-            overall_success = all(success_by_query.get(q_num, [False]))
-            
-            # Average the pricing across the matching run_paths for this query
-            pricing_list = pricing_by_query.get(q_num, [])
-            avg_pricing = {}
-            if pricing_list:
-                for key in ["runtime_vcpu-hour_cents", "runtime_gb-hour_cents", "memory_events_cents", "total_cents"]:
-                    avg_pricing[key] = sum(p.get(key, 0) for p in pricing_list) / len(pricing_list)
-                avg_pricing["all_runs_details"] = pricing_list
-            else:
-                avg_pricing = {
-                    "runtime_vcpu-hour_cents": 0,
-                    "runtime_gb-hour_cents": 0,
-                    "memory_events_cents": 0,
-                    "total_cents": 0
-                }
-                
-            output_data["traces"][q_str] = {
-                "trace_ids": trace_ids_by_query.get(q_num, []),
-                "success": overall_success,
-                "pricing_details": avg_pricing,
-                "graphs": []
-            }
-            
-        node_metrics = {"node_name": node_name}
-        for col in final_aggregated.columns:
-            if col not in ["query_number", "node_name"]:
-                node_metrics[col] = float(row[col]) # ensures standard JSON types
-                
-        output_data["traces"][q_str]["graphs"].append(node_metrics)
-    
-    # Save to JSON named after the folder grouping
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-        
-    output_path = os.path.join(OUTPUT_DIR, f"{batch_name}.json")
-    
-    with open(output_path, 'w') as f:
-        json.dump(output_data, f, indent=4)
+        for d in os.listdir(base):
+            if d != "_archive":
+                dirs.append(os.path.join(base, d))
+    return dirs
 
-    # Save detailed text log with summing and averaging information
-    log_path = os.path.join(OUTPUT_DIR, f"{batch_name}.log")
-    with open(log_path, 'w') as f:
-        f.write(f"Aggregation details for batch: {batch_name}\n")
-        f.write("=" * 60 + "\n\n")
-        f.write("1. Internal Grouped (Summing Output within each Run Path):\n")
-        f.write(internal_grouped.to_string() + "\n\n")
-        f.write("2. Final Aggregated (Averaging across Run Paths):\n")
-        f.write(final_aggregated.to_string() + "\n\n")
-
-    print(f"Successfully aggregated {len(run_paths)} runs for batch {batch_name}.")
-    print(f" Saved JSON to {output_path}")
-    print(f" Saved LOG to {log_path}")
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--if_checkpointer", action="store_true", help="If true, sets memory_events_cents to 0 for E/N memory configs.")
+    parser = argparse.ArgumentParser(
+        description="Unified aggregator for monolith & distributed agentic workflows")
+    parser.add_argument("--if_checkpointer", default="false",
+                        help="'true' → compute memory_events_cents for all configs; "
+                             "'false' → zero for E/N configs")
+    parser.add_argument("--base_log_dir",
+                        default=os.getenv("BASE_LOG_DIR",
+                                          "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs"))
+    parser.add_argument("--dates", nargs="+", default=["2026-03-10", "2026-03-11"],
+                        help="Date folders to scan")
+    parser.add_argument("--out_ext", default="_aggregated_logs")
     args = parser.parse_args()
 
-    print("Discovering workload batches...")
-    batches = manually_create_workloads()
-    print(f"Found {len(batches)} batches.")
-    
-    for batch_name, run_paths in batches.items():
-        if len(run_paths) > 0:
-            aggregate_batch(batch_name, run_paths, if_checkpointer=args.if_checkpointer)
+    if_checkpointer = args.if_checkpointer.lower() == "true"
+    now = datetime.now()
+    output_dir = os.path.join(args.base_log_dir, args.out_ext,
+                              now.strftime("%Y-%m-%d"), now.strftime("%H-%M-%S"))
+
+    log_dirs = collect_log_dirs(args.base_log_dir, args.dates)
+    print(f"Scanning {len(log_dirs)} log directories …")
+
+    batches = discover_batches(log_dirs)
+    print(f"Found {len(batches)} batches, checkpointer={if_checkpointer}\n")
+
+    for batch_name, run_paths in sorted(batches.items()):
+        if run_paths:
+            aggregate_batch(batch_name, run_paths, output_dir, if_checkpointer)
+
 
 if __name__ == "__main__":
     main()

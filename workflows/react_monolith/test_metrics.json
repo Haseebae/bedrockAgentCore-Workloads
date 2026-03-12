@@ -1,0 +1,541 @@
+{
+  "session_id": "13449d94-a9ef-4f28-a09f-b2f8f92fe686",
+  "app_name": "react_monolith",
+  "memory_config": "full_trace",
+  "s3_enabled": true,
+  "traces": {
+    "1": {
+      "trace_id": "4298822fa0dd49b4b2df06f9e6f5ef44",
+      "success": false,
+      "needs_retry": false,
+      "reason": "Agent failed to return a valid evaluation response or trace timed out.",
+      "feedback": "Check agent logs to debug execution failure.",
+      "iteration_count": -1,
+      "max_iterations": -1,
+      "graphs": [
+        {
+          "graph_id": 0,
+          "graph_name": "planner",
+          "psutil_metrics": {
+            "graph_name": "react",
+            "session_id": "13449d94-a9ef-4f28-a09f-b2f8f92fe686",
+            "trace_id": "4298822fa0dd49b4b2df06f9e6f5ef44",
+            "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+            "peak_RAM_GB": 0.1283,
+            "step_count": 5,
+            "graph_e2e_s": 18.1599
+          },
+          "nodes": [
+            {
+              "node_name": "planner",
+              "langgraph_step": 1,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-09-41.580126",
+                  "input_tokens": 406,
+                  "output_tokens": 156,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 3850.52,
+                  "input_bytes": 1699,
+                  "output_bytes": 764,
+                  "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+                  "wall_clock_s": 3.8505
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {}
+            }
+          ]
+        },
+        {
+          "graph_id": 1,
+          "graph_name": "actor",
+          "psutil_metrics": {},
+          "nodes": [
+            {
+              "node_name": "actor",
+              "langgraph_step": 2,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-09-42.540057",
+                  "input_tokens": 633,
+                  "output_tokens": 23,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 955.2,
+                  "input_bytes": 3158,
+                  "output_bytes": 165,
+                  "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+                  "wall_clock_s": 0.9552
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 0.9586,
+                "peak_RAM_GB": 0.1265
+              }
+            },
+            {
+              "node_name": "tools",
+              "langgraph_step": 3,
+              "llm": [],
+              "mcp_tools": {
+                "3.a": {
+                  "tool_name": "download_article",
+                  "timestamp": "2026-03-12__15-09-42.684609",
+                  "metrics": {
+                    "execution_time_ms": 111.67,
+                    "memory_utilized_bytes": 0,
+                    "s3_upload_latency_ms": 0,
+                    "s3_upload_size_bytes": 0,
+                    "cache_hit": true,
+                    "cache_read_latency_ms": 111.67,
+                    "cache_data_retrieved_bytes": 5590337
+                  },
+                  "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+                  "wall_clock_s": 0.1117
+                }
+              },
+              "psutil_metrics": {
+                "node_e2e_s": 0.1437,
+                "peak_RAM_GB": 0.1267
+              }
+            },
+            {
+              "node_name": "actor",
+              "langgraph_step": 4,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-09-45.690728",
+                  "input_tokens": 729,
+                  "output_tokens": 132,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 3001.35,
+                  "input_bytes": 3348,
+                  "output_bytes": 462,
+                  "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+                  "wall_clock_s": 3.0013
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 3.0048,
+                "peak_RAM_GB": 0.1274
+              }
+            },
+            {
+              "node_name": "tools",
+              "langgraph_step": 5,
+              "llm": [],
+              "mcp_tools": {
+                "5.a": {
+                  "tool_name": "document_retriever",
+                  "timestamp": "2026-03-12__15-09-45.870701",
+                  "metrics": {
+                    "execution_time_ms": 150.4,
+                    "memory_utilized_bytes": 0,
+                    "s3_upload_latency_ms": 0,
+                    "s3_upload_size_bytes": 0,
+                    "cache_hit": true,
+                    "cache_read_latency_ms": 85.51,
+                    "cache_fetch_latency_ms": 64.89,
+                    "cache_data_retrieved_bytes": 3974
+                  },
+                  "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+                  "wall_clock_s": 0.1504
+                },
+                "5.b": {
+                  "tool_name": "document_retriever",
+                  "timestamp": "2026-03-12__15-09-45.949970",
+                  "metrics": {
+                    "execution_time_ms": 57.47,
+                    "memory_utilized_bytes": 0,
+                    "s3_upload_latency_ms": 0,
+                    "s3_upload_size_bytes": 0,
+                    "cache_hit": true,
+                    "cache_read_latency_ms": 13.49,
+                    "cache_fetch_latency_ms": 43.98,
+                    "cache_data_retrieved_bytes": 4007
+                  },
+                  "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+                  "wall_clock_s": 0.0575
+                }
+              },
+              "psutil_metrics": {
+                "node_e2e_s": 0.2584,
+                "peak_RAM_GB": 0.1277
+              }
+            },
+            {
+              "node_name": "actor",
+              "langgraph_step": 6,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-09-49.923962",
+                  "input_tokens": 3371,
+                  "output_tokens": 198,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 3970.05,
+                  "input_bytes": 11346,
+                  "output_bytes": 1143,
+                  "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+                  "wall_clock_s": 3.97
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 3.9729,
+                "peak_RAM_GB": 0.1277
+              }
+            }
+          ]
+        },
+        {
+          "graph_id": 2,
+          "graph_name": "evaluator",
+          "psutil_metrics": {},
+          "nodes": [
+            {
+              "node_name": "evaluator",
+              "langgraph_step": 7,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-09-50.784864",
+                  "input_tokens": 3254,
+                  "output_tokens": 53,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 856.07,
+                  "input_bytes": 10306,
+                  "output_bytes": 286,
+                  "state_id": "3a29e1f6-bc69-4a40-8719-f3c31be81acb",
+                  "wall_clock_s": 0.8561
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 0.8606,
+                "peak_RAM_GB": 0.1278
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "2": {
+      "trace_id": "23366b84a9ff4484984ff0af4c2cbbe5",
+      "success": false,
+      "needs_retry": false,
+      "reason": "Agent failed to return a valid evaluation response or trace timed out.",
+      "feedback": "Check agent logs to debug execution failure.",
+      "iteration_count": -1,
+      "max_iterations": -1,
+      "graphs": [
+        {
+          "graph_id": 0,
+          "graph_name": "planner",
+          "psutil_metrics": {
+            "graph_name": "react",
+            "session_id": "13449d94-a9ef-4f28-a09f-b2f8f92fe686",
+            "trace_id": "23366b84a9ff4484984ff0af4c2cbbe5",
+            "state_id": "351c17a1-f39c-4476-b566-072211522730",
+            "peak_RAM_GB": 0.1285,
+            "step_count": 4,
+            "graph_e2e_s": 14.5209
+          },
+          "nodes": [
+            {
+              "node_name": "planner",
+              "langgraph_step": 1,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-09-53.581894",
+                  "input_tokens": 3535,
+                  "output_tokens": 96,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 2293.13,
+                  "input_bytes": 11978,
+                  "output_bytes": 467,
+                  "state_id": "351c17a1-f39c-4476-b566-072211522730",
+                  "wall_clock_s": 2.2931
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {}
+            }
+          ]
+        },
+        {
+          "graph_id": 1,
+          "graph_name": "actor",
+          "psutil_metrics": {},
+          "nodes": [
+            {
+              "node_name": "actor",
+              "langgraph_step": 2,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-09-55.357200",
+                  "input_tokens": 3642,
+                  "output_tokens": 58,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 1773.37,
+                  "input_bytes": 12843,
+                  "output_bytes": 227,
+                  "state_id": "351c17a1-f39c-4476-b566-072211522730",
+                  "wall_clock_s": 1.7734
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 1.774,
+                "peak_RAM_GB": 0.1283
+              }
+            },
+            {
+              "node_name": "tools",
+              "langgraph_step": 3,
+              "llm": [],
+              "mcp_tools": {
+                "3.a": {
+                  "tool_name": "document_retriever",
+                  "timestamp": "2026-03-12__15-09-55.520267",
+                  "metrics": {
+                    "execution_time_ms": 135.29,
+                    "memory_utilized_bytes": 0,
+                    "s3_upload_latency_ms": 0,
+                    "s3_upload_size_bytes": 0,
+                    "cache_hit": true,
+                    "cache_read_latency_ms": 106.47,
+                    "cache_fetch_latency_ms": 28.82,
+                    "cache_data_retrieved_bytes": 3955
+                  },
+                  "state_id": "351c17a1-f39c-4476-b566-072211522730",
+                  "wall_clock_s": 0.1353
+                }
+              },
+              "psutil_metrics": {
+                "node_e2e_s": 0.1624,
+                "peak_RAM_GB": 0.1283
+              }
+            },
+            {
+              "node_name": "actor",
+              "langgraph_step": 4,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-10-03.670160",
+                  "input_tokens": 4826,
+                  "output_tokens": 394,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 8144.93,
+                  "input_bytes": 16815,
+                  "output_bytes": 2125,
+                  "state_id": "351c17a1-f39c-4476-b566-072211522730",
+                  "wall_clock_s": 8.1449
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 8.1485,
+                "peak_RAM_GB": 0.1285
+              }
+            }
+          ]
+        },
+        {
+          "graph_id": 2,
+          "graph_name": "evaluator",
+          "psutil_metrics": {},
+          "nodes": [
+            {
+              "node_name": "evaluator",
+              "langgraph_step": 5,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-10-05.557038",
+                  "input_tokens": 4958,
+                  "output_tokens": 41,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 1881.34,
+                  "input_bytes": 17054,
+                  "output_bytes": 230,
+                  "state_id": "351c17a1-f39c-4476-b566-072211522730",
+                  "wall_clock_s": 1.8813
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 1.8865,
+                "peak_RAM_GB": 0.1285
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "3": {
+      "trace_id": "7979692df8344ab4a78c8d3668c98ed8",
+      "success": false,
+      "needs_retry": false,
+      "reason": "Agent failed to return a valid evaluation response or trace timed out.",
+      "feedback": "Check agent logs to debug execution failure.",
+      "iteration_count": -1,
+      "max_iterations": -1,
+      "graphs": [
+        {
+          "graph_id": 0,
+          "graph_name": "planner",
+          "psutil_metrics": {
+            "graph_name": "react",
+            "session_id": "13449d94-a9ef-4f28-a09f-b2f8f92fe686",
+            "trace_id": "7979692df8344ab4a78c8d3668c98ed8",
+            "state_id": "6ac831b4-4d5e-4242-b94f-4d948d7dba37",
+            "peak_RAM_GB": 0.1296,
+            "step_count": 4,
+            "graph_e2e_s": 34.4061
+          },
+          "nodes": [
+            {
+              "node_name": "planner",
+              "langgraph_step": 1,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-10-09.364564",
+                  "input_tokens": 5243,
+                  "output_tokens": 110,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 3156.78,
+                  "input_bytes": 18717,
+                  "output_bytes": 554,
+                  "state_id": "6ac831b4-4d5e-4242-b94f-4d948d7dba37",
+                  "wall_clock_s": 3.1568
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {}
+            }
+          ]
+        },
+        {
+          "graph_id": 1,
+          "graph_name": "actor",
+          "psutil_metrics": {},
+          "nodes": [
+            {
+              "node_name": "actor",
+              "langgraph_step": 2,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-10-14.366736",
+                  "input_tokens": 5378,
+                  "output_tokens": 58,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 4997.44,
+                  "input_bytes": 19756,
+                  "output_bytes": 226,
+                  "state_id": "6ac831b4-4d5e-4242-b94f-4d948d7dba37",
+                  "wall_clock_s": 4.9974
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 5.0013,
+                "peak_RAM_GB": 0.1293
+              }
+            },
+            {
+              "node_name": "tools",
+              "langgraph_step": 3,
+              "llm": [],
+              "mcp_tools": {
+                "3.a": {
+                  "tool_name": "document_retriever",
+                  "timestamp": "2026-03-12__15-10-14.519071",
+                  "metrics": {
+                    "execution_time_ms": 120.24000000000001,
+                    "memory_utilized_bytes": 0,
+                    "s3_upload_latency_ms": 0,
+                    "s3_upload_size_bytes": 0,
+                    "cache_hit": true,
+                    "cache_read_latency_ms": 93.01,
+                    "cache_fetch_latency_ms": 27.23,
+                    "cache_data_retrieved_bytes": 4042
+                  },
+                  "state_id": "6ac831b4-4d5e-4242-b94f-4d948d7dba37",
+                  "wall_clock_s": 0.1202
+                }
+              },
+              "psutil_metrics": {
+                "node_e2e_s": 0.1519,
+                "peak_RAM_GB": 0.1293
+              }
+            },
+            {
+              "node_name": "actor",
+              "langgraph_step": 4,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-10-37.774043",
+                  "input_tokens": 6652,
+                  "output_tokens": 433,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 23251.78,
+                  "input_bytes": 23815,
+                  "output_bytes": 2275,
+                  "state_id": "6ac831b4-4d5e-4242-b94f-4d948d7dba37",
+                  "wall_clock_s": 23.2518
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 23.2537,
+                "peak_RAM_GB": 0.1293
+              }
+            }
+          ]
+        },
+        {
+          "graph_id": 2,
+          "graph_name": "evaluator",
+          "psutil_metrics": {},
+          "nodes": [
+            {
+              "node_name": "evaluator",
+              "langgraph_step": 5,
+              "llm": [
+                {
+                  "model_name": "gpt-4o-mini",
+                  "timestamp": "2026-03-12__15-10-40.305336",
+                  "input_tokens": 6802,
+                  "output_tokens": 41,
+                  "cached_tokens": 0,
+                  "network_latency_ms": 2526.17,
+                  "input_bytes": 24117,
+                  "output_bytes": 216,
+                  "state_id": "6ac831b4-4d5e-4242-b94f-4d948d7dba37",
+                  "wall_clock_s": 2.5262
+                }
+              ],
+              "mcp_tools": {},
+              "psutil_metrics": {
+                "node_e2e_s": 2.5306,
+                "peak_RAM_GB": 0.1295
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

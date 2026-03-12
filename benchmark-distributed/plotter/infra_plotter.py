@@ -57,45 +57,36 @@ def extract_costs_from_trace(filepath):
         
         query_name = f"Query{iter_key}"
         
-        pricing_details = iter_data.get("pricing_details", {})
+        in_tok = out_tok = cached_tok = 0
+        agent_time_ms = 0
+        agent_calls = 1 # Placeholder
         
-        # 1. LLM Cost
-        if pricing_details and "llm_cents" in pricing_details:
-            llm_cost = pricing_details["llm_cents"]
-        else:
-            in_tok = out_tok = cached_tok = 0
-            for node in iter_data.get("graphs", []):
-                node_name = node.get("node_name", "").lower()
-                if node_name in ["planner", "actor", "evaluator"]:
-                    in_tok += node.get("llm_input_tokens", 0)
-                    out_tok += node.get("llm_output_tokens", 0)
-                    cached_tok += node.get("llm_cached_tokens", 0)
-            llm_cost = calculate_llm_cost(in_tok, out_tok, cached_tok)
+        mcp_time_ms = 0
+        mcp_calls = 1 # Placeholder
         
-        # 2. Agent Cost
-        if pricing_details and "total_cents" in pricing_details:
-            # Note: total_cents in aggregate_logs now includes llm and mcp.
-            # We want just the "agent" part (vcpu + gb + memory).
-            vcpu = pricing_details.get("runtime_vcpu-hour_cents", 0)
-            gb = pricing_details.get("runtime_gb-hour_cents", 0)
-            mem = pricing_details.get("memory_events_cents", 0)
-            agent_cost = vcpu + gb + mem
-        else:
-            agent_time_ms = 0
-            for node in iter_data.get("graphs", []):
-                if node.get("node_name", "").lower() in ["planner", "actor", "evaluator"]:
-                    agent_time_ms += node.get("llm_network_latency_ms", 0)
-            agent_cost = calculate_agent_faas_cost(1, agent_time_ms / 1000.0)
+        for node in iter_data.get("graphs", []):
+            node_name = node.get("node_name", "").lower()
             
-        # 3. MCP Cost
-        if pricing_details and "mcp_cents" in pricing_details:
-            mcp_cost = pricing_details["mcp_cents"]
+            if node_name in ["planner", "actor", "evaluator"]:
+                in_tok += node.get("llm_input_tokens", 0)
+                out_tok += node.get("llm_output_tokens", 0)
+                cached_tok += node.get("llm_cached_tokens", 0)
+                agent_time_ms += node.get("llm_network_latency_ms", 0)
+                
+            elif node_name == "tools":
+                mcp_time_ms += node.get("tool_execution_time_ms", 0)
+        
+        # Calculate resulting costs inside the trace iteration
+        llm_cost = calculate_llm_cost(in_tok, out_tok, cached_tok)
+        
+        # Use provided pricing details if available, otherwise fallback
+        pricing_details = iter_data.get("pricing_details", {})
+        if pricing_details and "total_cents" in pricing_details:
+            agent_cost = pricing_details["total_cents"]
         else:
-            mcp_time_ms = 0
-            for node in iter_data.get("graphs", []):
-                if node.get("node_name", "").lower() == "tools":
-                    mcp_time_ms += node.get("tool_execution_time_ms", 0)
-            mcp_cost = calculate_mcp_cost(1, mcp_time_ms / 1000.0)
+            agent_cost = calculate_agent_faas_cost(agent_calls, agent_time_ms / 1000.0)
+            
+        mcp_cost = calculate_mcp_cost(mcp_calls, mcp_time_ms / 1000.0)
         
         results[query_name] = {
             "llm": llm_cost,
@@ -160,7 +151,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
     x_positions = np.arange(len(CONFIG_ORDER))
     
     is_log = "log" in paper_name.lower()
-    max_y = 2.5
+    max_y = 2.0
     
     # --- Value logging ---
     exceeds_list = []
@@ -185,7 +176,7 @@ def plot_single_paper(paper_name, paper_data, output_path):
         
         # Query Titles - centered over the bar group
         group_center = (x_positions[0] + x_positions[-1]) / 2
-        query_y = max_y-0.05
+        query_y = 1.95
         ax.text(group_center, query_y, query, ha='center', va='top', fontweight='bold', fontsize=18)
         
         ax.set_xticks(x_positions)

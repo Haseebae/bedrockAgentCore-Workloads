@@ -33,6 +33,7 @@ metric_logger.addHandler(handler)
 session_id_var = contextvars.ContextVar("session_id", default="unknown_session")
 current_node_var = contextvars.ContextVar("current_node", default="unknown")
 trace_id_var = contextvars.ContextVar("trace_id", default="unknown_trace")
+query_id_var = contextvars.ContextVar("query_id", default="unknown_query")
 state_id_var = contextvars.ContextVar("state_id", default="unknown_state")
 
 from common.logging_callback import SessionMetricsCallback
@@ -62,7 +63,7 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
     if not server_urls:
         raise ValueError(f"No MCP servers found for workload_type={workload_type}, s3_enabled={s3_enabled}")
     from common.mcp_tool_factory import mcp_tools_from_multiple_servers
-    all_tools = mcp_tools_from_multiple_servers(server_urls, session_id_var, metric_logger, trace_id_var, state_id_var)
+    all_tools = mcp_tools_from_multiple_servers(server_urls, session_id_var, metric_logger, trace_id_var, query_id_var, state_id_var)
 
     model_name = os.environ.get("MODEL_NAME", "openai:gpt-4o-mini")
     model = init_chat_model(model_name)
@@ -70,6 +71,9 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
     evaluator_model = model.with_structured_output(EvalResult)
 
     def planner_node(state: AgentState):
+        node_start_time = time.time()
+        process = psutil.Process()
+        initial_mem = process.memory_info().rss
         current_node_var.set("planner")
         messages = state["messages"]
         # Because of the checkpointer, state.get() will now reliably pull the previous run's count
@@ -83,7 +87,26 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
             system_msg_content += f"\n\nPrevious attempt failed. Feedback:\n{state['evaluation']['feedback']}"
             
         system_msg = SystemMessage(content=system_msg_content)
+        
         response = model.invoke([system_msg] + messages)
+        
+        node_end_time = time.time()
+        final_mem = process.memory_info().rss
+        peak_mem = max(initial_mem, final_mem)
+        peak_RAM = round(peak_mem / (1024 * 1024 * 1024), 4)
+
+        metric_logger.info(json.dumps({
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+            "event_type": "psutil_metrics_node",
+            "node_name": "planner",
+            "node_e2e_s": round(node_end_time - node_start_time, 4),
+            "peak_RAM_GB": peak_RAM,
+            "trace_id": trace_id_var.get(),
+            "query_id": query_id_var.get(),
+            "session_id": session_id_var.get(),
+            "state_id": state_id_var.get()
+        }))
+
         metric_logger.info(json.dumps({
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
             "event_type": "debug",
@@ -91,6 +114,7 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
             "iteration_count": iteration_count,
             "step_count": step_count,
             "trace_id": trace_id_var.get(),
+            "query_id": query_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
             "message_len": len(messages),
@@ -107,7 +131,30 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
         plan_json = state.get("plan", "{}")
         system_msg_content = ACTOR_PROMPT.format(plan_json=plan_json)
         system_msg = SystemMessage(content=system_msg_content)
+        
+        node_start_time = time.time()
+        process = psutil.Process()
+        initial_mem = process.memory_info().rss
+
         response = actor_model_with_tools.invoke([system_msg] + messages)
+
+        node_end_time = time.time()
+        final_mem = process.memory_info().rss
+        peak_mem = max(initial_mem, final_mem)
+        peak_RAM = round(peak_mem / (1024 * 1024 * 1024), 4)
+
+        metric_logger.info(json.dumps({
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+            "event_type": "psutil_metrics_node",
+            "node_name": "actor",
+            "node_e2e_s": round(node_end_time - node_start_time, 4),
+            "peak_RAM_GB": peak_RAM,
+            "trace_id": trace_id_var.get(),
+            "query_id": query_id_var.get(),
+            "session_id": session_id_var.get(),
+            "state_id": state_id_var.get()
+        }))
+
         metric_logger.info(json.dumps({
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
             "event_type": "debug",
@@ -115,6 +162,7 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
             "iteration_count": iteration_count,
             "step_count": step_count,
             "trace_id": trace_id_var.get(),
+            "query_id": query_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
             "message_len": len(messages),
@@ -129,7 +177,29 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
         step_count = state["step_count"] + 1
         iteration_count = state["iteration_count"]
         
+        node_start_time = time.time()
+        process = psutil.Process()
+        initial_mem = process.memory_info().rss
+
         eval_result = evaluator_model.invoke(messages)
+
+        node_end_time = time.time()
+        final_mem = process.memory_info().rss
+        peak_mem = max(initial_mem, final_mem)
+        peak_RAM = round(peak_mem / (1024 * 1024 * 1024), 4)
+
+        metric_logger.info(json.dumps({
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+            "event_type": "psutil_metrics_node",
+            "node_name": "evaluator",
+            "node_e2e_s": round(node_end_time - node_start_time, 4),
+            "peak_RAM_GB": peak_RAM,
+            "trace_id": trace_id_var.get(),
+            "query_id": query_id_var.get(),
+            "session_id": session_id_var.get(),
+            "state_id": state_id_var.get()
+        }))
+
         metric_logger.info(json.dumps({
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
             "event_type": "debug",
@@ -137,6 +207,7 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
             "iteration_count": iteration_count,
             "step_count": step_count,
             "trace_id": trace_id_var.get(),
+            "query_id": query_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
             "message_len": len(messages),
@@ -149,8 +220,14 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
 
     def tools_node(state: AgentState):
         current_node_var.set("tools")
+        node_start_time = time.time()
+        process = psutil.Process()
+        initial_mem = process.memory_info().rss
+
         result = tools_runnable.invoke(state)
         
+
+
         iteration_count = state.get("iteration_count")
         step_count = state.get("step_count") + 1
         
@@ -170,11 +247,29 @@ def build_agent(use_checkpointer=True, workload_type="arxiv", s3_enabled=False):
             "iteration_count": iteration_count,
             "step_count": step_count,
             "trace_id": trace_id_var.get(),
+            "query_id": query_id_var.get(),
             "session_id": session_id_var.get(),
             "state_id": state_id_var.get(),
             "message_len": len(state["messages"]),
             "request": request_str,
             "response": response_str
+        }))
+
+        node_end_time = time.time()
+        final_mem = process.memory_info().rss
+        peak_mem = max(initial_mem, final_mem)
+        peak_RAM = round(peak_mem / (1024 * 1024 * 1024), 4)
+
+        metric_logger.info(json.dumps({
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
+            "event_type": "psutil_metrics_node",
+            "node_name": "tools",
+            "node_e2e_s": round(node_end_time - node_start_time, 4),
+            "peak_RAM_GB": peak_RAM,
+            "trace_id": trace_id_var.get(),
+            "query_id": query_id_var.get(),
+            "session_id": session_id_var.get(),
+            "state_id": state_id_var.get()
         }))
         return result
 
@@ -241,15 +336,17 @@ def handle(payload):
     load_dotenv("/Users/haseeb/Code/iisc/bedrockAC/workflows/react_monolith/.env.dev")
     start_time = time.time()
     prompt = payload.get("prompt", "Hello!")
-
+    app_name = payload.get("app_name", "react_monolith")
     session_id = payload.get("session_id", "default_session_id")
     actor_id = payload.get("actor_id", "default_actor_id")
+    query_id = payload.get("query_id", "default_query_id")
     trace_id = payload.get("trace_id", "default_trace_id")
     memory_config = payload.get("memory_config", "empty")
     workload_type = payload.get("workload_type", "arxiv")
     s3_enabled = payload.get("s3_enabled", False)
     
     session_id_var.set(session_id)
+    query_id_var.set(query_id)
     trace_id_var.set(trace_id)
     
     state_id = str(uuid.uuid4())
@@ -270,6 +367,7 @@ def handle(payload):
             current_node_var=current_node_var,
             metric_logger=metric_logger,
             trace_id_var=trace_id_var,
+            query_id_var=query_id_var,
             state_id_var=state_id_var
         )]
     }
@@ -309,13 +407,15 @@ def handle(payload):
     
     metric_logger.info(json.dumps({
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d__%H-%M-%S.%f"),
-        "event_type": "billing_metrics",
+        "event_type": "psutil_metrics_graph",
+        "graph_name": app_name,
         "session_id": session_id,
+        "query_id": query_id,
         "trace_id": trace_id,
         "state_id": state_id,
-        "peak_memory_gb": round(peak_memory_gb, 4),
+        "peak_RAM_GB": round(peak_memory_gb, 4),
         "step_count": result.get("step_count", 0),
-        "wall_clock_s": round(wall_clock_time, 4)
+        "graph_e2e_s": round(wall_clock_time, 4)
     }))
     
     return {

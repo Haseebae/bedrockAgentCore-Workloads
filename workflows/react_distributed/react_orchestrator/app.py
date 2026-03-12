@@ -101,6 +101,7 @@ def invoke_sub_agent(runtime_arn: str, payload: dict, agent_name: str) -> dict:
             "trace_id": trace_id,
             "session_id": session_id,
             "state_id": payload.get("orchestrator_state_id", "unknown"),
+            "local_trace_id": payload.get("local_trace_id", ""),
             "description": "invoked sub-agent",
             "latency_ms": round(latency_ms, 2),
             "status": "success",
@@ -119,6 +120,7 @@ def invoke_sub_agent(runtime_arn: str, payload: dict, agent_name: str) -> dict:
             "trace_id": trace_id,
             "session_id": session_id,
             "state_id": payload.get("orchestrator_state_id", "unknown"),
+            "local_trace_id": payload.get("local_trace_id", ""),
             "description": "failed to invoke sub-agent",
             "latency_ms": round(latency_ms, 2),
             "status": "error",
@@ -161,11 +163,13 @@ def build_orchestrator():
         if evaluation and evaluation.get("feedback"):
             feedback = evaluation["feedback"]
 
+        local_trace_id = uuid.uuid4().hex
         planner_payload = {
             "prompt": state["prompt"],
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
             "orchestrator_state_id": state["orchestrator_state_id"],
+            "local_trace_id": local_trace_id,
             "actor_id": state["actor_id"],
             "memory_config": state["memory_config"],
             "workload_type": state["workload_type"],
@@ -195,12 +199,14 @@ def build_orchestrator():
     def invoke_actor(state: OrchestratorState):
         agent_state = state["agent_state"]
 
+        local_trace_id = uuid.uuid4().hex
         actor_payload = {
             "plan": state["plan"],
             "prompt": state["prompt"],
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
             "orchestrator_state_id": state["orchestrator_state_id"],
+            "local_trace_id": local_trace_id,
             "actor_id": state["actor_id"],
             "memory_config": state["memory_config"],
             "workload_type": state["workload_type"],
@@ -228,6 +234,7 @@ def build_orchestrator():
     def invoke_evaluator(state: OrchestratorState):
         agent_state = state["agent_state"]
 
+        local_trace_id = uuid.uuid4().hex
         eval_payload = {
             "original_task": state["prompt"],
             "plan": state["plan"],
@@ -235,6 +242,7 @@ def build_orchestrator():
             "session_id": state["session_id"],
             "trace_id": state["trace_id"],
             "orchestrator_state_id": state["orchestrator_state_id"],
+            "local_trace_id": local_trace_id,
             "actor_id": state["actor_id"],
             "memory_config": state["memory_config"],
             "workload_type": state["workload_type"],
