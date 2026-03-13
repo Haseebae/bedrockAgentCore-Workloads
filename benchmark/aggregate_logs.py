@@ -138,63 +138,87 @@ def parse_graph(graph_data: dict, state_id: str) -> dict:
 
 
 def parse_query(query_id: str, query_data: dict, position: int) -> dict:
-    """Parse a query, select final trace iteration, run L2 aggregation.
-    Returns a fully-costed QuerySummary dict."""
+    """Parse a query: collect ALL trace iterations, run L2 aggregation.
+    
+    Every trace iteration represents real work:
+      - Monolith retries: sequential iterations, all consumed compute
+      - Distributed:      constituent invocations, all are part of the query
+    
+    Invalid traces are discarded upstream — everything here is real.
+    """
     traces = query_data.get("traces", {})
     if not traces:
         return _empty_query(query_id, position)
 
-    # Take the last (highest-numbered) iteration
-    final_key = max(traces.keys(), key=lambda k: int(k))
-    trace = traces[final_key]
-    state_id = trace.get("state_id", "")
+    # Sort iterations numerically
+    sorted_keys = sorted(traces.keys(), key=lambda k: int(k))
+    final_key = sorted_keys[-1]
+    final_trace = traces[final_key]
+    iteration_count = len(sorted_keys)
 
-    # --- Parse graphs ---
-    graphs = [parse_graph(gd, state_id)
-              for gd in trace.get("graphs", [])]
+    # ── Collect graphs from ALL iterations ──
+    all_graphs = []
+    all_trace_ids = []
+    all_state_ids = []
 
-    # --- L2: aggregate graphs → query ---
-    total_e2e      = sum(g["graph_e2e_s"]  for g in graphs)
-    peak_ram       = max((g["peak_RAM_GB"] for g in graphs), default=0.0)
-    total_steps    = sum(g["step_count"]   for g in graphs)
-    num_invocations = len(graphs)
+    print(f"\n[STATUS] Iterating through all traces for query {query_id}")
+    for iter_key in sorted_keys:
+        trace = traces[iter_key]
+        trace_id = trace.get("trace_id", "")
+        state_id = trace.get("state_id", "")
 
-    # Merge nodes_by_type across all graphs
+        all_trace_ids.append(trace_id)
+        all_state_ids.append(state_id)
+
+        for gd in trace.get("graphs", []):
+            print(f"[STATUS] Parsing graph <{gd.get('graph_name')}> for query {query_id}")
+            all_graphs.append(parse_graph(gd, state_id))
+
+    if not all_graphs:
+        return _empty_query(query_id, position)
+
+    # ── L2: aggregate ALL graphs → query ──
+    total_e2e      = sum(g["graph_e2e_s"]  for g in all_graphs)
+    peak_ram       = max(g["peak_RAM_GB"]  for g in all_graphs)
+    total_steps    = sum(g["step_count"]   for g in all_graphs)
+    num_invocations = len(all_graphs)
+
+    # Merge nodes_by_type across ALL graphs from ALL iterations
     merged_nodes: Dict[str, dict] = {}
-    for g in graphs:
+    for g in all_graphs:
         for name, ns in g["nodes_by_type"].items():
             if name in merged_nodes:
                 _merge_node_into(merged_nodes[name], ns)
             else:
                 merged_nodes[name] = deepcopy(ns)
 
-    # --- Costs ---
+    # ── Costs (all iterations included) ──
     tot_in     = sum(n["input_tokens"]  for n in merged_nodes.values())
     tot_out    = sum(n["output_tokens"] for n in merged_nodes.values())
     tot_cached = sum(n["cached_tokens"] for n in merged_nodes.values())
     llm_c = llm_cost_cents(tot_in, tot_out, tot_cached)
 
-    tot_mcp_calls = sum(n["mcp_call_count"]  for n in merged_nodes.values())
+    tot_mcp_calls = sum(n["mcp_call_count"]   for n in merged_nodes.values())
     tot_mcp_time  = sum(n["mcp_wall_clock_s"] for n in merged_nodes.values())
     mcp_c = mcp_cost_cents(tot_mcp_calls, tot_mcp_time)
 
-    # Runtime & memory: SUM of per-graph costs (handles both topologies)
-    runtime_c = sum(g["runtime_cost"]["total_cents"] for g in graphs)
-    memory_c  = sum(g["memory_cost_cents"]           for g in graphs)
+    # Runtime & memory: SUM of per-graph costs (each graph = 1 invocation)
+    runtime_c = sum(g["runtime_cost"]["total_cents"] for g in all_graphs)
+    memory_c  = sum(g["memory_cost_cents"]           for g in all_graphs)
 
     return {
         "query_id":               query_id,
         "query_position":         position,
-        "success":                trace.get("success", False),
-        "iteration_count":        trace.get("iteration_count", int(final_key)),
-        "trace_id":               trace.get("trace_id", ""),
-        "state_id":               state_id,
+        "success":                final_trace.get("success", False),
+        "iteration_count":        iteration_count,
+        "trace_ids":              all_trace_ids,
+        "state_ids":              all_state_ids,
         "num_graph_invocations":  num_invocations,
         "total_e2e_s":            total_e2e,
         "total_peak_RAM_GB":      peak_ram,
         "total_step_count":       total_steps,
         "nodes_by_type":          merged_nodes,
-        "graphs":                 graphs,
+        "graphs":                 all_graphs,
         "cost": {
             "llm_cents":     llm_c,
             "mcp_cents":     mcp_c,
@@ -209,7 +233,7 @@ def _empty_query(query_id, position):
     return {
         "query_id": query_id, "query_position": position,
         "success": False, "iteration_count": 0,
-        "trace_id": "", "state_id": "",
+        "trace_ids": [], "state_ids": [],
         "num_graph_invocations": 0,
         "total_e2e_s": 0, "total_peak_RAM_GB": 0, "total_step_count": 0,
         "nodes_by_type": {}, "graphs": [],
@@ -295,13 +319,14 @@ def average_queries_across_runs(summaries: List[dict]) -> dict:
     # ── Per-run audit trail ──
     result["run_details"] = [
         {
-            "query_id":       s["query_id"],
-            "trace_id":       s["trace_id"],
-            "state_id":       s["state_id"],
-            "success":        s["success"],
-            "total_e2e_s":    s["total_e2e_s"],
+            "query_id":         s["query_id"],
+            "trace_ids":        s["trace_ids"],
+            "state_ids":        s["state_ids"],
+            "success":          s["success"],
+            "iteration_count":  s["iteration_count"],
+            "total_e2e_s":      s["total_e2e_s"],
             "total_cost_cents": s["cost"]["total_cents"],
-            "num_graphs":     s["num_graph_invocations"],
+            "num_graphs":       s["num_graph_invocations"],
         }
         for s in summaries
     ]
@@ -453,10 +478,13 @@ def collect_log_dirs(base_log_dir: str, date_strings: List[str]) -> List[str]:
         for d in os.listdir(base):
             if d != "_archive":
                 dirs.append(os.path.join(base, d))
+    print(dirs)
     return dirs
 
 
 def main():
+    from dotenv import load_dotenv
+    load_dotenv("/home/prometheus/haseeb/bedrockAgentCore-Workloads/benchmark/config.env")
     parser = argparse.ArgumentParser(
         description="Unified aggregator for monolith & distributed agentic workflows")
     parser.add_argument("--if_checkpointer", default="false",
@@ -465,7 +493,7 @@ def main():
     parser.add_argument("--base_log_dir",
                         default=os.getenv("BASE_LOG_DIR",
                                           "/Users/haseeb/Code/iisc/bedrockAC/benchmark/logs"))
-    parser.add_argument("--dates", nargs="+", default=["2026-03-10", "2026-03-11"],
+    parser.add_argument("--dates", nargs="+", default=["2026-03-12"],
                         help="Date folders to scan")
     parser.add_argument("--out_ext", default="_aggregated_logs")
     args = parser.parse_args()
@@ -482,6 +510,8 @@ def main():
     print(f"Found {len(batches)} batches, checkpointer={if_checkpointer}\n")
 
     for batch_name, run_paths in sorted(batches.items()):
+        timestamps = [run_path.split("/")[-3] for run_path in run_paths]
+        print(f"\nAggregating batch: {batch_name} collected at \n{timestamps}")
         if run_paths:
             aggregate_batch(batch_name, run_paths, output_dir, if_checkpointer)
 
